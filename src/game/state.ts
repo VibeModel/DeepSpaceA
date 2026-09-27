@@ -74,6 +74,8 @@ export function freshRunState(): Omit<
       steelProd: 0,
       compProd: 0,
       researchProd: 0,
+      furnaceCap: 0,
+      factoryCap: 0,
       furnaceUtil: 0,
       factoryUtil: 0,
       labActive: false,

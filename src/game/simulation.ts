@@ -44,6 +44,8 @@ function emptyRates(): LiveRates {
     steelProd: 0,
     compProd: 0,
     researchProd: 0,
+    furnaceCap: 0,
+    factoryCap: 0,
     furnaceUtil: 0,
     factoryUtil: 0,
     labActive: false,
@@ -96,6 +98,7 @@ export function simulate(state: GameState, dtMs: number): void {
   res.ore -= oreToSmelt;
   res.steel += steelProduced;
   r.steelProd = steelProduced / dt;
+  r.furnaceCap = furnaceCap;
   r.furnaceUtil = furnaceCap > 0 ? oreToSmelt / (furnaceCap * dt) : 0;
 
   // 3. Factory — convert steel into components (limited by steel on hand).
@@ -110,6 +113,7 @@ export function simulate(state: GameState, dtMs: number): void {
   res.steel -= steelToUse;
   res.components += compProduced;
   r.compProd = compProduced / dt;
+  r.factoryCap = factoryCap;
   r.factoryUtil = factoryCap > 0 ? steelToUse / (factoryCap * dt) : 0;
 
   // 4. Auto-sell surplus (above reserve). Runs before lab upkeep so selling

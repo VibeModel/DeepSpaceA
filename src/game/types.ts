@@ -96,6 +96,10 @@ export interface LiveRates {
   steelProd: number;
   compProd: number;
   researchProd: number;
+  // Gross input capacity of the processors (ore/s for furnaces, steel/s for
+  // factories). Used for the analytics diagnostics panel.
+  furnaceCap: number;
+  factoryCap: number;
   // Per-building utilization (0..1) for bottleneck display.
   furnaceUtil: number;
   factoryUtil: number;

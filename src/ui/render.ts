@@ -28,6 +28,7 @@ import type {
   TechId,
   UpgradeId,
   SellableResource,
+  LiveRates,
 } from "../game/types";
 import { formatNumber, formatRate, formatDuration } from "./format";
 
@@ -71,6 +72,7 @@ const buildingRefs: Record<string, {
 const resRefs: Record<string, { val: HTMLElement; delta: HTMLElement }> = {};
 const stageRefs: Record<string, {
   rate: HTMLElement;
+  sub: HTMLElement;
   utilWrap?: HTMLElement;
   utilBar?: HTMLElement;
   warn?: HTMLElement;
@@ -281,6 +283,7 @@ function init(handlers: Handlers): void {
     }
     stageRefs[id] = {
       rate: div.querySelector("[data-rate]")!,
+      sub: div.querySelector("[data-sub]")!,
       utilWrap: hasUtil ? div.querySelector("[data-util]") as HTMLElement : undefined,
       utilBar: hasUtil ? (div.querySelector("[data-util] span") as HTMLElement) : undefined,
       warn: undefined,
@@ -461,6 +464,12 @@ function updateLive(): void {
   });
   setStage("research", r.researchProd, null, null);
 
+  // Numeric diagnostics (Production Analytics unlock).
+  setStageSub("mining", r, s);
+  setStageSub("smelting", r, s);
+  setStageSub("manufacturing", r, s);
+  setStageSub("research", r, s);
+
   // Live stats.
   const runMs = Date.now() - s.stats.currentRunStart;
   document.getElementById("ls-runtime")!.textContent = formatDuration(runMs);
@@ -496,6 +505,75 @@ function setStage(
     } else {
       ref.warn.style.display = "none";
     }
+  }
+}
+
+// Numeric diagnostics per stage, shown once "Production Analytics" is unlocked.
+function setStageSub(id: string, r: LiveRates, s: GameState): void {
+  const el = stageRefs[id].sub;
+  if (!s.flags.analyticsUnlocked) {
+    el.textContent = "";
+    return;
+  }
+  const rate = formatRate;
+
+  if (id === "mining") {
+    if (r.furnaceCap <= 0) {
+      el.textContent = "尚无下游熔炼炉";
+    } else {
+      el.textContent =
+        r.furnaceCap > r.oreProd * 1.001
+          ? `下游需求 ${rate(r.furnaceCap)} · 采矿不足`
+          : `下游需求 ${rate(r.furnaceCap)}`;
+    }
+    return;
+  }
+
+  if (id === "smelting") {
+    if (r.furnaceCap <= 0) {
+      el.textContent = "尚未建造熔炼炉";
+      return;
+    }
+    const util = Math.round(r.furnaceUtil * 100);
+    if (r.oreProd > r.furnaceCap * 1.001) {
+      const have = s.buildings.furnace;
+      const need = Math.max(1, Math.ceil((have * r.oreProd) / r.furnaceCap) - have);
+      el.textContent = `利用率 ${util}% · 铁矿盈余 ${rate(r.oreProd - r.furnaceCap)} · 建议 +${need} 熔炉`;
+    } else if (r.furnaceUtil < 0.99) {
+      el.textContent = `利用率 ${util}% · 铁矿缺口 ${rate(r.furnaceCap - r.oreProd)} · 采矿不足`;
+    } else {
+      el.textContent = `利用率 ${util}% · 满负荷`;
+    }
+    return;
+  }
+
+  if (id === "manufacturing") {
+    if (r.factoryCap <= 0) {
+      el.textContent = "尚未建造制造厂";
+      return;
+    }
+    const util = Math.round(r.factoryUtil * 100);
+    if (r.steelProd > r.factoryCap * 1.001) {
+      const have = s.buildings.factory;
+      const need = Math.max(1, Math.ceil((have * r.steelProd) / r.factoryCap) - have);
+      el.textContent = `利用率 ${util}% · 钢材盈余 ${rate(r.steelProd - r.factoryCap)} · 建议 +${need} 制造厂`;
+    } else if (r.factoryUtil < 0.99) {
+      el.textContent = `利用率 ${util}% · 钢材缺口 ${rate(r.factoryCap - r.steelProd)} · 熔炼不足`;
+    } else {
+      el.textContent = `利用率 ${util}% · 满负荷`;
+    }
+    return;
+  }
+
+  if (id === "research") {
+    if (s.buildings.laboratory <= 0) {
+      el.textContent = "尚未建造实验室";
+    } else {
+      el.textContent = r.labActive
+        ? `研究产出 ${rate(r.researchProd)}`
+        : "⚠ 信用点不足，实验室停机";
+    }
+    return;
   }
 }
 

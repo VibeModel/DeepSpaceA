@@ -131,6 +131,8 @@ function near(a: number, b: number, eps = 1e-6): boolean {
   ok(s.resources.components > beforeComp, "components produced");
   ok(Number.isFinite(s.resources.ore) && s.resources.ore >= 0, "ore finite/nonneg");
   ok(s.rates.furnaceUtil <= 1.0001, "furnace util <= 1");
+  ok(s.rates.furnaceCap > 0, "furnace capacity reported");
+  ok(s.rates.factoryCap > 0, "factory capacity reported");
   // furnace capacity (5/s) < mining (20/s) -> ore accumulates, furnace full.
   ok(s.rates.oreAccumulating === true, "ore accumulating detected");
 }
