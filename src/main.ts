@@ -23,6 +23,10 @@ import { doPrestige } from "./game/prestige";
 import { MILESTONES, AUTOSAVE_MS, MANUAL_MINE_AMOUNT, TECHS, UPGRADES } from "./game/balance";
 import type { GameState, BuildingId, SellableResource, TechId, UpgradeId } from "./game/types";
 import * as render from "./ui/render";
+import { loadUiSettings, setNumberFormat, type NumberFormat } from "./ui/settings";
+
+// Apply persisted UI preferences (number format) before any number is rendered.
+loadUiSettings();
 
 let state: GameState = loadGame() ?? createNewGame();
 
@@ -153,6 +157,9 @@ const handlers: render.Handlers = {
   },
   onSetTab() {
     /* render handles active styling */
+  },
+  onSetNumberFormat(fmt: NumberFormat) {
+    setNumberFormat(fmt); // also persists to localStorage
   },
   onExport() {
     return exportSave(state);

@@ -31,8 +31,9 @@ import type {
   LiveRates,
 } from "../game/types";
 import { formatNumber, formatRate, formatDuration } from "./format";
+import { getNumberFormat, type NumberFormat } from "./settings";
 
-export type TabName = "research" | "automation" | "prestige" | "stats";
+export type TabName = "research" | "automation" | "prestige" | "stats" | "settings";
 
 export interface Handlers {
   onMine(): void;
@@ -45,6 +46,7 @@ export interface Handlers {
   onToggleAutoResearch(): void;
   onPrestige(): void;
   onSetTab(tab: TabName): void;
+  onSetNumberFormat(fmt: NumberFormat): void;
   onExport(): string;
   onImport(code: string): boolean;
   onManualSave(): void;
@@ -201,6 +203,7 @@ function init(handlers: Handlers): void {
       <button data-tab="automation">🤖 自动化 Automation</button>
       <button data-tab="prestige">💠 重构 Prestige</button>
       <button data-tab="stats">📈 数据 Statistics</button>
+      <button data-tab="settings">⚙ 设置 Settings</button>
     </div>
     <div class="tab-panel" id="tab-content"></div>
 
@@ -352,6 +355,12 @@ function init(handlers: Handlers): void {
     const arBtn = t.closest("[data-autoresearch]");
     if (arBtn) {
       H.onToggleAutoResearch();
+      return;
+    }
+    const fmtBtn = t.closest("[data-numfmt]");
+    if (fmtBtn) {
+      H.onSetNumberFormat((fmtBtn as HTMLElement).dataset.numfmt as NumberFormat);
+      tabDirty = true; // re-render settings tab immediately to update highlight
       return;
     }
     const dbg = t.closest("[data-debug]");
@@ -589,6 +598,7 @@ function renderTab(): void {
   if (currentTab === "research") el.innerHTML = renderResearch();
   else if (currentTab === "automation") el.innerHTML = renderAutomation();
   else if (currentTab === "prestige") el.innerHTML = renderPrestige();
+  else if (currentTab === "settings") el.innerHTML = renderSettings();
   else el.innerHTML = renderStats();
 }
 
@@ -712,6 +722,50 @@ function renderPrestige(): string {
     </div>`;
   }
   html += `</div>`;
+  return html;
+}
+
+function renderSettings(): string {
+  const current = getNumberFormat();
+  const options: { id: NumberFormat; title: string; desc: string }[] = [
+    {
+      id: "suffix",
+      title: "后缀缩写 Suffix",
+      desc: "K / M / B / T … Dc，超过 10³⁶ 回落科学计数。",
+    },
+    {
+      id: "scientific",
+      title: "科学计数法 Scientific",
+      desc: "如 3.30e211（3 位有效数字）。",
+    },
+    {
+      id: "engineering",
+      title: "工程计数法 Engineering",
+      desc: "指数为 3 的倍数，如 33.0e210。",
+    },
+  ];
+
+  let html = `<h3 style="color:var(--accent)">设置 / Settings</h3>`;
+  html += `<h4 style="margin:14px 0 6px">数字显示 Number Format</h4>`;
+  html += `<p class="hint" style="margin-top:0">选择全站数字的显示方式（资源、成本、速率、诊断等）。</p>`;
+  html += `<div class="grid-cards">`;
+  for (const o of options) {
+    const active = o.id === current;
+    html += `<div class="up-card${active ? " selected" : ""}">
+      <div class="uname">${o.title}${active ? " ✓" : ""}</div>
+      <div class="udesc">${o.desc}</div>
+      <button class="${active ? "" : "primary"}" data-numfmt="${o.id}" ${active ? "disabled" : ""}>${active ? "使用中" : "选择"}</button>
+    </div>`;
+  }
+  html += `</div>`;
+
+  // Live preview under the active format.
+  html += `<h4 style="margin:16px 0 6px">预览 Preview</h4>`;
+  html += `<div class="up-card">
+    <div class="udesc">1,234,567 → <b>${formatNumber(1234567)}</b></div>
+    <div class="udesc">3.3×10²¹¹ → <b>${formatNumber(3.3e211)}</b></div>
+    <div class="udesc">42 → <b>${formatNumber(42)}</b></div>
+  </div>`;
   return html;
 }
 

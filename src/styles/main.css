@@ -409,6 +409,11 @@ button.big {
 .tech-card.locked {
   opacity: 0.45;
 }
+/* Selected option (e.g. current number format in Settings). */
+.up-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(56, 225, 196, 0.35) inset;
+}
 
 .toggle-row {
   display: flex;
