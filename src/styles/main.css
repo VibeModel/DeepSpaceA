@@ -1,0 +1,560 @@
+:root {
+  --bg: #0a0e16;
+  --bg-2: #0d1320;
+  --panel: #141b2b;
+  --panel-2: #1a2336;
+  --border: #243049;
+  --text: #cdd6e4;
+  --muted: #7b8aa3;
+  --accent: #38e1c4;
+  --accent-2: #5b8def;
+  --warn: #f5a623;
+  --danger: #ff5c5c;
+  --good: #4fd17a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: radial-gradient(1200px 800px at 70% -10%, #122036 0%, var(--bg) 55%);
+  color: var(--text);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+#app {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 14px 18px 60px;
+}
+
+/* ---------- Top bar ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+.topbar h1 {
+  font-size: 18px;
+  margin: 0;
+  letter-spacing: 0.5px;
+  color: #eaf2ff;
+}
+.topbar h1 small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+  letter-spacing: 2px;
+}
+.top-readouts {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.readout {
+  text-align: right;
+  min-width: 90px;
+}
+.readout .label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.readout .value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #eaf2ff;
+}
+.readout .value.accent {
+  color: var(--accent);
+}
+.readout .value.core {
+  color: var(--accent-2);
+}
+
+/* ---------- Layout ---------- */
+.main-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr 300px;
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 980px) {
+  .main-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+.panel > h2 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+/* ---------- Buttons ---------- */
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 8px 12px;
+  font-size: 13px;
+  transition: background 0.12s, border-color 0.12s, transform 0.05s;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+button.primary {
+  background: linear-gradient(180deg, #2bb89c, #1f9180);
+  border-color: #2bb89c;
+  color: #04130f;
+  font-weight: 600;
+}
+button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+button.toggle.on {
+  background: linear-gradient(180deg, #2b6fb8, #1f5690);
+  border-color: var(--accent-2);
+  color: #eaf2ff;
+}
+button.big {
+  width: 100%;
+  padding: 12px;
+  font-size: 15px;
+}
+
+/* ---------- Buildings ---------- */
+.building {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: var(--panel-2);
+}
+.building .head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.building .icon {
+  font-size: 20px;
+}
+.building .name {
+  font-weight: 600;
+  flex: 1;
+}
+.building .count {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.building .desc {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 4px 0 8px;
+}
+.building .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.building .cost {
+  font-size: 12px;
+  color: var(--muted);
+}
+.building .cost b {
+  color: #eaf2ff;
+}
+.milestone {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.milestone .next {
+  color: var(--warn);
+}
+.milestone .done {
+  color: var(--good);
+}
+.locked {
+  opacity: 0.5;
+}
+
+/* ---------- Utilization bar ---------- */
+.bar {
+  height: 7px;
+  background: #0c1322;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+.bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  width: 0%;
+}
+.bar.warn > span {
+  background: linear-gradient(90deg, var(--warn), #ffce6b);
+}
+.bar.full > span {
+  background: linear-gradient(90deg, var(--good), #8fe6a6);
+}
+
+/* ---------- Production flow ---------- */
+.flow-stage {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  background: var(--panel-2);
+}
+.flow-stage .icon {
+  font-size: 22px;
+}
+.flow-stage .info {
+  flex: 1;
+}
+.flow-stage .info .title {
+  font-weight: 600;
+}
+.flow-stage .info .sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+.flow-stage .rate {
+  text-align: right;
+  min-width: 90px;
+}
+.flow-stage .rate .v {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.flow-arrow {
+  text-align: center;
+  color: var(--muted);
+  font-size: 16px;
+  margin: -2px 0;
+}
+.warn-line {
+  color: var(--warn);
+  font-size: 12px;
+  margin-top: 4px;
+}
+.accum-line {
+  color: var(--accent-2);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.resource-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.resource-row .name {
+  color: var(--muted);
+}
+.resource-row .val {
+  font-weight: 600;
+}
+.resource-row .delta.pos {
+  color: var(--good);
+}
+.resource-row .delta.neg {
+  color: var(--danger);
+}
+
+/* ---------- Manual controls ---------- */
+.manual {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.manual button {
+  flex: 1;
+}
+
+/* ---------- Tabs ---------- */
+.tabbar {
+  display: flex;
+  gap: 6px;
+  margin: 16px 0 12px;
+  flex-wrap: wrap;
+}
+.tabbar button {
+  flex: 1;
+  min-width: 120px;
+}
+.tabbar button.active {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, #1c3050, #16243c);
+  color: #eaf2ff;
+}
+.tab-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.tech-card,
+.up-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--panel-2);
+}
+.tech-card .branch {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+.tech-card .tname,
+.up-card .uname {
+  font-weight: 600;
+  margin: 2px 0;
+}
+.tech-card .tdesc,
+.up-card .udesc {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 8px;
+  min-height: 28px;
+}
+.tech-card.locked {
+  opacity: 0.45;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.toggle-row .label {
+  font-size: 13px;
+}
+
+/* ---------- Toasts ---------- */
+#toasts {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 50;
+}
+.toast {
+  background: var(--panel-2);
+  border: 1px solid var(--accent);
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 10px 14px;
+  min-width: 220px;
+  animation: slidein 0.25s ease;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+.toast.warn {
+  border-color: var(--warn);
+}
+.toast .t-title {
+  font-weight: 700;
+  color: var(--accent);
+}
+.toast.warn .t-title {
+  color: var(--warn);
+}
+.toast .t-sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+@keyframes slidein {
+  from {
+    transform: translateX(30px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* ---------- Modal ---------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 7, 14, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px;
+  max-width: 460px;
+  width: 90%;
+}
+.modal h3 {
+  margin: 0 0 12px;
+  color: var(--accent);
+}
+.modal .body {
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.modal .body .line {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+.modal .actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+textarea {
+  width: 100%;
+  height: 110px;
+  background: #0c1322;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px;
+  font-family: monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+
+/* ---------- Stats list ---------- */
+.stat-line {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+}
+.stat-line .k {
+  color: var(--muted);
+}
+.stat-line .v {
+  font-weight: 600;
+}
+
+/* ---------- Debug ---------- */
+.debug {
+  margin-top: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: #0b1018;
+}
+.debug summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.debug .dbg-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.debug button {
+  font-size: 11px;
+  padding: 6px 10px;
+}
+.hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.save-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+/* Floating "+N" feedback when manually mining. */
+.float-num {
+  position: fixed;
+  pointer-events: none;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--accent-1);
+  text-shadow: 0 0 6px rgba(0, 229, 255, 0.6);
+  animation: floatUp 0.8s ease-out forwards;
+  z-index: 50;
+}
+@keyframes floatUp {
+  0% { opacity: 0; transform: translate(-50%, 0) scale(0.8); }
+  15% { opacity: 1; transform: translate(-50%, -6px) scale(1.1); }
+  100% { opacity: 0; transform: translate(-50%, -38px) scale(1); }
+}
+
+/* Brief flash on a resource readout when it changes via a manual action. */
+.flash {
+  animation: flashPulse 0.5s ease-out;
+}
+@keyframes flashPulse {
+  0% { color: var(--accent-1); text-shadow: 0 0 10px rgba(0, 229, 255, 0.8); }
+  100% { color: inherit; text-shadow: none; }
+}
