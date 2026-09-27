@@ -20,14 +20,18 @@ import {
   researchTech,
 } from "./research";
 import { capNumber } from "./num";
+import { computePower } from "./power";
 import type { TechId } from "./types";
 
 // Cap a single simulation step so a long background stall cannot destabilise
 // the inventory math. Larger gaps are handled by the offline routine instead.
 const MAX_TICK_DT = 300_000; // 5 minutes
 
+// Order also drives auto-buy priority and sanitisation. The solar array sits
+// right after the mining drone so auto-buy keeps the grid supplied.
 const BUILDING_ORDER: BuildingId[] = [
   "miningDrone",
+  "solarArray",
   "furnace",
   "factory",
   "laboratory",
@@ -46,6 +50,13 @@ function emptyRates(): LiveRates {
     researchProd: 0,
     furnaceCap: 0,
     factoryCap: 0,
+    furnaceInput: 0,
+    factoryInput: 0,
+    furnaceYield: 1,
+    factoryYield: 1,
+    powerSupply: 0,
+    powerDemand: 0,
+    powerFactor: 1,
     furnaceUtil: 0,
     factoryUtil: 0,
     labActive: false,
@@ -76,45 +87,68 @@ export function simulate(state: GameState, dtMs: number): void {
 
   const r = emptyRates();
 
-  // 1. Mining — gross ore production.
+  // 0. Power grid — a brownout (factor < 1) scales every production and
+  //    consumption rate below. Supply is finite but demand is computed from
+  //    raw building counts, so throttling never shrinks the demand itself.
+  const power = computePower(state, mods);
+  const pf = power.factor;
+  r.powerSupply = power.supply;
+  r.powerDemand = power.demand;
+  r.powerFactor = pf;
+
+  // 1. Mining — gross ore production (scaled by grid availability).
   const oreRate =
     b.miningDrone *
     BUILDINGS.miningDrone.baseProduction! *
     mods.miningMult *
     milestoneMultiplier("miningDrone", b.miningDrone) *
-    mods.globalProdMult;
+    mods.globalProdMult *
+    pf;
   res.ore += oreRate * dt;
   r.oreProd = oreRate;
 
-  // 2. Furnace — convert ore into steel (limited by ore on hand).
+  // 2. Furnace — convert ore into steel (limited by ore on hand and power).
+  //    `furnaceCap` stays the NOMINAL design capacity so the advertised
+  //    utilisation reads like "input 8 / capacity 10 = 80%"; power scaling
+  //    goes into the effective capacity used for the actual conversion.
   const furnaceCap =
     b.furnace *
     BUILDINGS.furnace.inputRate! *
     mods.smeltMult *
     milestoneMultiplier("furnace", b.furnace) *
     mods.globalProdMult;
-  const oreToSmelt = Math.min(furnaceCap * dt, res.ore);
+  const furnaceCapEff = furnaceCap * pf;
+  const oreToSmelt = Math.min(furnaceCapEff * dt, res.ore);
   const steelProduced = oreToSmelt * BUILDINGS.furnace.outputYield! * mods.steelYieldMult;
   res.ore -= oreToSmelt;
   res.steel += steelProduced;
   r.steelProd = steelProduced / dt;
   r.furnaceCap = furnaceCap;
+  r.furnaceInput = oreToSmelt / dt;
+  r.furnaceYield = BUILDINGS.furnace.outputYield! * mods.steelYieldMult;
   r.furnaceUtil = furnaceCap > 0 ? oreToSmelt / (furnaceCap * dt) : 0;
+  // Utilisation relative to *supplied* capacity; used so a power brownout is
+  // not mis-reported as an ore shortage.
+  const furnaceUtilEff = furnaceCapEff > 0 ? oreToSmelt / (furnaceCapEff * dt) : 0;
 
-  // 3. Factory — convert steel into components (limited by steel on hand).
+  // 3. Factory — convert steel into components (limited by steel on hand and power).
   const factoryCap =
     b.factory *
     BUILDINGS.factory.inputRate! *
     mods.factoryMult *
     milestoneMultiplier("factory", b.factory) *
     mods.globalProdMult;
-  const steelToUse = Math.min(factoryCap * dt, res.steel);
+  const factoryCapEff = factoryCap * pf;
+  const steelToUse = Math.min(factoryCapEff * dt, res.steel);
   const compProduced = steelToUse * BUILDINGS.factory.outputYield! * mods.componentYieldMult;
   res.steel -= steelToUse;
   res.components += compProduced;
   r.compProd = compProduced / dt;
   r.factoryCap = factoryCap;
+  r.factoryInput = steelToUse / dt;
+  r.factoryYield = BUILDINGS.factory.outputYield! * mods.componentYieldMult;
   r.factoryUtil = factoryCap > 0 ? steelToUse / (factoryCap * dt) : 0;
+  const factoryUtilEff = factoryCapEff > 0 ? steelToUse / (factoryCapEff * dt) : 0;
 
   // 4. Auto-sell surplus (above reserve). Runs before lab upkeep so selling
   //    can feed the labs.
@@ -133,14 +167,17 @@ export function simulate(state: GameState, dtMs: number): void {
   });
 
   // 5. Laboratory — pay credit upkeep, produce research (scaled if short).
+  //    Both output and upkeep scale with power availability.
   const labCount = b.laboratory;
   const researchRate =
     labCount *
     BUILDINGS.laboratory.baseProduction! *
     mods.researchMult *
     milestoneMultiplier("laboratory", labCount) *
-    mods.globalProdMult;
-  const upkeep = labCount * BUILDINGS.laboratory.labUpkeep! * (1 - mods.labUpkeepReduction);
+    mods.globalProdMult *
+    pf;
+  const upkeep =
+    labCount * BUILDINGS.laboratory.labUpkeep! * (1 - mods.labUpkeepReduction) * pf;
   r.researchProd = researchRate;
   if (labCount > 0) {
     const owed = upkeep * dt;
@@ -177,11 +214,12 @@ export function simulate(state: GameState, dtMs: number): void {
   r.research = (res.research - before.research) / dt;
   r.credits = (res.credits - before.credits) / dt;
 
-  // 8. Bottleneck flags.
-  r.oreShortage = b.furnace > 0 && r.furnaceUtil < 0.99;
-  r.oreAccumulating = b.furnace > 0 && r.oreProd > furnaceCap * 1.001 && furnaceCap > 0;
-  r.steelShortage = b.factory > 0 && r.factoryUtil < 0.99;
-  r.steelAccumulating = b.factory > 0 && r.steelProd > factoryCap * 1.001 && factoryCap > 0;
+  // 8. Bottleneck flags. Utilisation is measured against *supplied* capacity so
+  //    a power brownout is not mistaken for a raw-material shortage.
+  r.oreShortage = b.furnace > 0 && furnaceCapEff > 0 && furnaceUtilEff < 0.99;
+  r.oreAccumulating = b.furnace > 0 && furnaceCapEff > 0 && oreRate > furnaceCapEff * 1.001;
+  r.steelShortage = b.factory > 0 && factoryCapEff > 0 && factoryUtilEff < 0.99;
+  r.steelAccumulating = b.factory > 0 && factoryCapEff > 0 && r.steelProd > factoryCapEff * 1.001;
 
   // 9. Lifetime / stats tracking.
   state.stats.totalOre += oreRate * dt;
@@ -275,6 +313,7 @@ function sanitize(state: GameState): void {
   // Prestige currency.
   state.coreData = capNumber(state.coreData);
   state.lifetimeCoreData = capNumber(state.lifetimeCoreData);
+  state.prestigeGranted = capNumber(state.prestigeGranted);
 
   // Live rates are transient but must stay finite for the UI.
   const r = state.rates;

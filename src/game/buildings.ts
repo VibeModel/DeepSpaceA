@@ -58,6 +58,9 @@ export function buildingUnlocked(state: GameState, id: BuildingId): boolean {
   switch (id) {
     case "miningDrone":
       return true;
+    case "solarArray":
+      // Power matters once you start automating, so expose it with the first drone.
+      return state.buildings.miningDrone >= 1;
     case "furnace":
       return state.buildings.miningDrone >= 1;
     case "factory":

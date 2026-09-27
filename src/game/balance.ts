@@ -2,7 +2,7 @@
 // Almost every tunable number lives here so the game can be rebalanced by
 // editing a handful of constants.
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 // Global upper bound for any game value. Keeps numbers finite even under
 // unbounded exponential growth (avoids Infinity/NaN corrupting state).
@@ -45,7 +45,15 @@ export const AUTOSELL_RESERVE: Record<"ore" | "steel" | "components", number> = 
   components: 200,
 };
 
+// Power grid. Every building draws power; the initial landing module provides a
+// small base supply so the very first mining drone never dead-locks. Supply is
+// NOT scaled by milestones (that would trivialise power late-game); the main
+// long-term lever is the repeatable "Grid Optimization" tech.
+export const BASE_POWER_SUPPLY = 15;
+
 // Building definitions (cost formula: baseCost * growth^owned).
+// `powerUse` = power drawn per second per unit; the solar array instead
+// supplies `baseSupply` per unit.
 export const BUILDINGS = {
   miningDrone: {
     id: "miningDrone" as const,
@@ -57,6 +65,18 @@ export const BUILDINGS = {
     baseProduction: 1,
     baseCost: 15,
     costGrowth: 1.15,
+    powerUse: 0.15,
+  },
+  solarArray: {
+    id: "solarArray" as const,
+    name: "太阳能阵列 / Solar Array",
+    icon: "☀",
+    description: "为全基地供电；电力不足时全产线按比例减产。",
+    category: "power" as const,
+    baseSupply: 6,
+    powerUse: 0,
+    baseCost: 120,
+    costGrowth: 1.1,
   },
   furnace: {
     id: "furnace" as const,
@@ -70,6 +90,7 @@ export const BUILDINGS = {
     outputYield: 1, // steel per ore
     baseCost: 120,
     costGrowth: 1.16,
+    powerUse: 0.6,
   },
   factory: {
     id: "factory" as const,
@@ -83,6 +104,7 @@ export const BUILDINGS = {
     outputYield: 1, // component per steel
     baseCost: 1_200,
     costGrowth: 1.17,
+    powerUse: 1.2,
   },
   laboratory: {
     id: "laboratory" as const,
@@ -95,6 +117,7 @@ export const BUILDINGS = {
     labUpkeep: 2, // credits per second per lab
     baseCost: 6_000,
     costGrowth: 1.18,
+    powerUse: 2.0,
   },
 };
 
@@ -118,10 +141,11 @@ export const AUTOBUY_MAX_PER_TICK = 5;
 // against exponential cost gives natural diminishing returns.
 export const INFINITE_TECH_COST_GROWTH = 1.5;
 
-// Tech tree. 15 techs across 3 branches. Each branch is linear (requires the
-// previous tech in the same branch). Mix of numeric, mechanic, automation and
+// Tech tree. 17 techs across 3 branches. Branches are mostly linear (each tech
+// requires the previous one), but a branch may fork (e.g. Grid Optimization
+// branches off Automated Smelting). Mix of numeric, mechanic, automation and
 // quality-of-life effects.
-// Nine "pure production multiplier" techs are repeatable (infinite): after the
+// Ten "pure production multiplier" techs are repeatable (infinite): after the
 // first purchase (level 1) they can be upgraded further for escalating cost.
 export const TECHS = {
   // Industrial Engineering — raw production boosts.
@@ -202,6 +226,17 @@ export const TECHS = {
     requires: ["automatedSmelting"],
     infinite: true,
     effectPerLevel: 0.5,
+  },
+  gridOptimization: {
+    id: "gridOptimization" as const,
+    name: "电网优化 / Grid Optimization",
+    branch: "Automation" as const,
+    icon: "🔌",
+    description: "全电网供电 +25%（每级再 +25%）。",
+    cost: 30,
+    requires: ["automatedSmelting"],
+    infinite: true,
+    effectPerLevel: 0.25,
   },
   automatedTrading: {
     id: "automatedTrading" as const,

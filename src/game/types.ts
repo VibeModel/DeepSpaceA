@@ -7,7 +7,12 @@ export type ResourceId =
   | "credits"
   | "research";
 
-export type BuildingId = "miningDrone" | "furnace" | "factory" | "laboratory";
+export type BuildingId =
+  | "miningDrone"
+  | "solarArray"
+  | "furnace"
+  | "factory"
+  | "laboratory";
 
 export type SellableResource = "ore" | "steel" | "components";
 
@@ -21,6 +26,7 @@ export type TechId =
   // Automation
   | "automatedSmelting"
   | "automatedAssembly"
+  | "gridOptimization"
   | "automatedTrading"
   | "autoBuyLogic"
   | "smartLogistics"
@@ -38,6 +44,28 @@ export type UpgradeId =
   | "automatedLogistics"
   | "researchArchive";
 
+// Achievements are pure trophies (no gameplay effect). Ids live here so both
+// types.ts consumers and achievements.ts can share the union without a cycle.
+export type AchievementId =
+  | "firstOre"
+  | "firstDrone"
+  | "smelter"
+  | "assembly"
+  | "lab"
+  | "solar"
+  | "oreBaron"
+  | "steelWill"
+  | "partsMaster"
+  | "firstMillion"
+  | "reboot"
+  | "cycleFive"
+  | "coreHoarder"
+  | "scholar"
+  | "milestoneMaster"
+  | "gridStable"
+  | "highThroughput"
+  | "timeTraveler";
+
 export interface BuildingDefinition {
   id: BuildingId;
   name: string;
@@ -45,8 +73,9 @@ export interface BuildingDefinition {
   description: string;
   baseCost: number;
   costGrowth: number;
-  // Producers (mining drone, laboratory handled specially) vs processors.
-  category: "producer" | "processor" | "lab";
+  // Producers (mining drone, laboratory handled specially) vs processors vs
+  // power suppliers.
+  category: "producer" | "processor" | "lab" | "power";
   // For producer: resource produced + base amount per second.
   produces?: ResourceId;
   baseProduction?: number;
@@ -55,6 +84,12 @@ export interface BuildingDefinition {
   output?: ResourceId;
   inputRate?: number; // units of input consumed per second per building
   outputYield?: number; // units of output produced per unit of input
+  // For lab: credit upkeep per second per building.
+  labUpkeep?: number;
+  // For power: supply each unit contributes (solar array).
+  baseSupply?: number;
+  // Power drawn per second per building (0 for the power building itself).
+  powerUse?: number;
 }
 
 export interface TechDefinition {
@@ -100,6 +135,17 @@ export interface LiveRates {
   // factories). Used for the analytics diagnostics panel.
   furnaceCap: number;
   factoryCap: number;
+  // Actual input consumed per second (for the structured bottleneck panel).
+  furnaceInput: number;
+  factoryInput: number;
+  // Effective conversion ratio (output per unit of input) incl. yield techs.
+  furnaceYield: number;
+  factoryYield: number;
+  // Power grid: supply (capacity), demand and the resulting throttle factor
+  // (1 = fine, <1 = brownout scaling every production/consumption rate).
+  powerSupply: number;
+  powerDemand: number;
+  powerFactor: number;
   // Per-building utilization (0..1) for bottleneck display.
   furnaceUtil: number;
   factoryUtil: number;
@@ -146,6 +192,12 @@ export interface GameState {
   permanentUpgrades: Record<UpgradeId, number>;
   coreData: number; // spendable prestige currency
   lifetimeCoreData: number;
+  // Highest raw core-data entitlement already claimed by a prestige. Only the
+  // delta above this is granted, so prestiging repeatedly at the same lifetime
+  // credits yields nothing (prevents farming Core Data).
+  prestigeGranted: number;
+  // Unlocked achievements (pure trophies). Kept across prestiges.
+  achievements: Record<AchievementId, boolean>;
   stats: GameStats;
   flags: {
     autoSellUnlocked: boolean;

@@ -29,6 +29,7 @@ export interface TechModifiers {
   globalProdMult: number;
   costGrowthReduction: number;
   labUpkeepReduction: number;
+  powerSupplyMult: number;
   unlockAutoSell: boolean;
   unlockAutoBuy: boolean;
   unlockAnalytics: boolean;
@@ -60,6 +61,7 @@ export function computeModifiers(state: GameState): TechModifiers {
     globalProdMult: 1,
     costGrowthReduction: 0,
     labUpkeepReduction: 0,
+    powerSupplyMult: 1,
     unlockAutoSell: false,
     unlockAutoBuy: false,
     unlockAnalytics: false,
@@ -77,6 +79,7 @@ export function computeModifiers(state: GameState): TechModifiers {
   // Automation
   m.smeltMult *= inf("automatedSmelting");
   m.factoryMult *= inf("automatedAssembly");
+  m.powerSupplyMult *= inf("gridOptimization");
   if (t.automatedTrading) m.unlockAutoSell = true;
   if (t.autoBuyLogic) m.unlockAutoBuy = true;
   if (t.smartLogistics) m.costGrowthReduction += 0.05;

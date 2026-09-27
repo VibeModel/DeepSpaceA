@@ -7,13 +7,20 @@ import type { GameState } from "./types";
 import { freshRunState } from "./state";
 import { capNumber } from "./num";
 
-// Core Data the player would gain if they prestiged right now.
+// Raw core-data entitlement from lifetime credits, BEFORE the gain multiplier.
+// Lifetime credits are cumulative and never reset, so the entitlement only ever
+// grows; the delta above what was already claimed is what a prestige grants.
+function rawEntitlement(state: GameState): number {
+  return Math.floor(Math.sqrt(state.stats.lifetimeCredits / PRESTIGE_DIVISOR));
+}
+
+// Core Data the player would gain if they prestiged right now. Only the part not
+// already claimed counts, so a prestige at the same lifetime credits yields 0.
 export function pendingCoreData(state: GameState): number {
   const mods = computeModifiers(state);
-  const raw = Math.floor(
-    Math.sqrt(state.stats.lifetimeCredits / PRESTIGE_DIVISOR),
-  );
-  return capNumber(Math.floor(raw * mods.prestigeGainMult));
+  const pendingRaw = rawEntitlement(state) - state.prestigeGranted;
+  if (pendingRaw <= 0) return 0;
+  return capNumber(Math.floor(pendingRaw * mods.prestigeGainMult));
 }
 
 export function canPrestige(state: GameState): boolean {
@@ -36,7 +43,10 @@ export function doPrestige(state: GameState): number {
   const coreData = state.coreData;
   const lifetimeCoreData = state.lifetimeCoreData;
   const permanentUpgrades = state.permanentUpgrades;
+  const achievements = state.achievements;
   const stats = state.stats;
+  // Claim the raw entitlement now; future prestiges only grant the delta above it.
+  const claimed = rawEntitlement(state);
 
   // Reset run-specific state.
   Object.assign(state, freshRunState());
@@ -45,7 +55,9 @@ export function doPrestige(state: GameState): number {
   state.coreData = coreData;
   state.lifetimeCoreData = lifetimeCoreData;
   state.permanentUpgrades = permanentUpgrades;
+  state.achievements = achievements;
   state.stats = stats;
+  state.prestigeGranted = claimed;
 
   // Prestige bookkeeping.
   state.stats.prestigeCount += 1;

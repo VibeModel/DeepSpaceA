@@ -6,7 +6,7 @@
 // does not affect game balance, which is why the constants live here rather
 // than in game/balance.ts.
 
-import type { GameState } from "../game/types";
+import type { BuildingId, GameState } from "../game/types";
 
 export type StageId = "mining" | "smelting" | "manufacturing" | "research";
 
@@ -88,12 +88,9 @@ export interface VisualInput {
   oreAccumulating: boolean;
   steelAccumulating: boolean;
   // Owned building counts.
-  buildings: {
-    miningDrone: number;
-    furnace: number;
-    factory: number;
-    laboratory: number;
-  };
+  buildings: Record<BuildingId, number>;
+  // Current power-grid throttle factor (1 = fine, <1 = brownout).
+  powerFactor: number;
   // Production Analytics gate for the amber warning state.
   analyticsUnlocked: boolean;
 }
@@ -128,6 +125,7 @@ export function toVisualInput(state: GameState): VisualInput {
     oreAccumulating: r.oreAccumulating,
     steelAccumulating: r.steelAccumulating,
     buildings: { ...state.buildings },
+    powerFactor: r.powerFactor ?? 1,
     analyticsUnlocked: state.flags.analyticsUnlocked,
   };
 }
@@ -140,7 +138,13 @@ export function deriveVisualParams(i: VisualInput): VisualParams {
   const glow = clamp01(VISUAL.glowFloor + intensity * (1 - VISUAL.glowFloor));
 
   const b = i.buildings;
-  const bTotal = b.miningDrone + b.furnace + b.factory + b.laboratory;
+  let bTotal = 0;
+  let maxOwned = 0;
+  for (const key of Object.keys(b) as BuildingId[]) {
+    const n = b[key] || 0;
+    bTotal += n;
+    if (n > maxOwned) maxOwned = n;
+  }
   // Linear fill so the light pool actually reaches full at buildingDotScale.
   const fill = clamp01(bTotal / VISUAL.buildingDotScale);
   const dotCount = Math.round(fill * VISUAL.dotPool);
@@ -158,8 +162,9 @@ export function deriveVisualParams(i: VisualInput): VisualParams {
   };
 
   const strained =
-    i.analyticsUnlocked &&
-    (i.oreShortage || i.steelShortage || i.oreAccumulating || i.steelAccumulating);
+    i.powerFactor < 0.995 ||
+    (i.analyticsUnlocked &&
+      (i.oreShortage || i.steelShortage || i.oreAccumulating || i.steelAccumulating));
 
   const creditIntensity = norm(i.creditsRate, VISUAL.creditScale);
 
@@ -175,11 +180,7 @@ export function deriveVisualParams(i: VisualInput): VisualParams {
     flowDur,
     dotCount,
     strained,
-    hasIndustry: b.furnace + b.factory > 0,
-    hasRing:
-      b.miningDrone >= VISUAL.ringThreshold ||
-      b.furnace >= VISUAL.ringThreshold ||
-      b.factory >= VISUAL.ringThreshold ||
-      b.laboratory >= VISUAL.ringThreshold,
+    hasIndustry: (b.furnace || 0) + (b.factory || 0) > 0,
+    hasRing: maxOwned >= VISUAL.ringThreshold,
   };
 }

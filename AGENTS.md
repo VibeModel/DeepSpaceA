@@ -19,22 +19,26 @@
 
 ### 目录结构
 - `src/game/` — 游戏逻辑（纯逻辑，可单测）
-  - `types.ts` 类型定义 / `balance.ts` 全部数值常量 / `buildings.ts` 建筑与成本 / `research.ts` 科技树 / `upgrades.ts` 永久升级 / `prestige.ts` 重构 / `state.ts` 状态与默认值 / `simulation.ts` 生产模拟与离线结算 / `save.ts` 存档
+  - `types.ts` 类型定义 / `balance.ts` 全部数值常量 / `buildings.ts` 建筑与成本 / `research.ts` 科技树 / `upgrades.ts` 永久升级 / `prestige.ts` 重构 / `state.ts` 状态与默认值 / `simulation.ts` 生产模拟与离线结算 / `save.ts` 存档 / `num.ts` 大数值运算 / `power.ts` 电力供需 / `achievements.ts` 成就系统
 - `src/ui/` — 界面层
-  - `render.ts` 数据驱动 UI 渲染与事件委托 / `format.ts` 数字与速率格式化
-- `src/styles/main.css` — 暗色科幻主题样式
-- `src/main.ts` — 启动、游戏主循环、自动保存、事件接线
-- `test/core.test.ts` — 核心逻辑测试（用 `tsx` 运行）
+  - `render.ts` 数据驱动 UI 渲染与事件委托 / `format.ts` 数字与速率格式化 / `settings.ts` UI 偏好持久化（数字格式、动画档位）/ `visual.ts` 数值→视觉参数映射（纯函数，可单测）
+- `src/styles/main.css` — 暗色科幻主题样式 / `src/styles/space.css` — 星球场景与动画
+- `src/main.ts` — 启动、游戏主循环、自动保存、事件接线、成就/里程碑检测
+- `test/` — 测试（用 `tsx` 运行，不经 `tsc`）
+  - `core.test.ts` 核心逻辑 / `power.test.ts` 电力供需（含平衡 bot）/ `achievements.test.ts` 成就 / `format.test.ts` 数字格式 / `visual.test.ts` 视觉映射
 
 ### 常用命令
 - `npm run dev` — 本地开发服务器
 - `npm run build` — 类型检查 + 生产构建（输出到 `dist/`）
-- `npm test` — 运行核心逻辑测试
+- `npm test` — 按顺序运行全部测试文件（core → power → achievements → format → visual）
 
 ### 约定
 - 游戏数值集中放在 `balance.ts`，改动平衡时优先改这里并同步相关测试。
+- 建筑、科技、成就的新增往往需要同步多处：`BuildingId`/`TechId`/`AchievementId` 联合类型、`BUILDING_ORDER`、`KEY_BINDINGS`、`visual.ts` 求和、`render.ts` 与 `main.ts` 中的硬编码列表，以及存档默认值。
+- **存档兼容**：`save.ts` 的 `normalizeState` 只合并默认对象中**已存在**的 key。新增状态字段（如建筑、成就）必须显式写入默认值，否则旧存档读入后会得到 `undefined`（运算变 `NaN`）。
 - 调试面板（`render.ts` 中的 `debugBlock`）仅在 `import.meta.env.DEV` 下渲染，生产构建不可见，不要依赖它在生产环境生效。
-- 新增可测试的游戏逻辑时，优先在 `test/core.test.ts` 补充用例。
+- 新增可测试的游戏逻辑时，在对应的 `test/*.test.ts` 补充用例；核心通用逻辑放 `test/core.test.ts`。
+- 快捷键（`render.ts` 的 `KEY_BINDINGS`）：Q 手动采矿 / W E R 卖矿 / A S D F G 购买对应建筑。
 
 ## 工作风格
 - 改动前先读相关文件，理解现有结构，避免无谓的重构。

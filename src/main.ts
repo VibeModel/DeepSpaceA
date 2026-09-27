@@ -17,10 +17,12 @@ import {
 import {
   buyBuilding,
   buildingUnlocked,
+  getBuilding,
 } from "./game/buildings";
 import { researchTech, applyTechUnlocks, techLevel } from "./game/research";
 import { buyUpgrade, upgradeLevel } from "./game/upgrades";
 import { doPrestige } from "./game/prestige";
+import { evaluateAchievements, getAchievement } from "./game/achievements";
 import { MILESTONES, AUTOSAVE_MS, MANUAL_MINE_AMOUNT, TECHS, UPGRADES } from "./game/balance";
 import type { GameState, BuildingId, SellableResource, TechId, UpgradeId } from "./game/types";
 import * as render from "./ui/render";
@@ -40,18 +42,26 @@ if (offline && (offline.produced.ore > 0 || offline.produced.credits > 0)) {
 let timeScale = 1;
 let lastAutosave = Date.now();
 let prevCounts: Record<BuildingId, number> = { ...state.buildings };
-let prevUnlocked: Record<BuildingId, boolean> = {
-  miningDrone: buildingUnlocked(state, "miningDrone"),
-  furnace: buildingUnlocked(state, "furnace"),
-  factory: buildingUnlocked(state, "factory"),
-  laboratory: buildingUnlocked(state, "laboratory"),
-};
+let prevUnlocked: Record<BuildingId, boolean> = snapshotTrackers();
+
+// Per-building unlock flags, used to detect newly unlocked systems. Centralised
+// so that adding a building never misses a hardcoded copy.
+function snapshotTrackers(): Record<BuildingId, boolean> {
+  const out = {} as Record<BuildingId, boolean>;
+  for (const id of Object.keys(state.buildings) as BuildingId[]) {
+    out[id] = buildingUnlocked(state, id);
+  }
+  return out;
+}
 
 function detectMilestones(): void {
   for (const id of Object.keys(state.buildings) as BuildingId[]) {
     const before = prevCounts[id];
     const after = state.buildings[id];
-    if (after > before) {
+    // Power buildings have no production milestone (supply is not scaled by
+    // milestones), so skip the misleading "产量 ×2" toast for them.
+    const isPower = getBuilding(id).category === "power";
+    if (after > before && !isPower) {
       for (const m of MILESTONES) {
         if (before < m && after >= m) {
           render.toast(
@@ -77,9 +87,20 @@ function detectMilestones(): void {
   }
 }
 
+// Unlock any newly satisfied achievements (pure trophies).
+function detectAchievements(): void {
+  const newly = evaluateAchievements(state);
+  for (const id of newly) {
+    const a = getAchievement(id);
+    render.toast(`${a.icon} 成就达成`, a.name, "info");
+  }
+  if (newly.length > 0) render.celebrateScene();
+}
+
 function buildingName(id: BuildingId): string {
   return {
     miningDrone: "采矿无人机",
+    solarArray: "太阳能阵列 Solar Array",
     furnace: "熔炼炉 Furnace",
     factory: "制造厂 Factory",
     laboratory: "实验室 Laboratory",
@@ -96,6 +117,7 @@ function loop(): void {
 
   simulate(state, dt * timeScale);
   detectMilestones();
+  detectAchievements();
 
   if (realNow - lastAutosave > AUTOSAVE_MS) {
     saveGame(state);
@@ -151,12 +173,7 @@ const handlers: render.Handlers = {
       saveGame(state);
       // Reset detection trackers for the new run.
       prevCounts = { ...state.buildings };
-      prevUnlocked = {
-        miningDrone: buildingUnlocked(state, "miningDrone"),
-        furnace: buildingUnlocked(state, "furnace"),
-        factory: buildingUnlocked(state, "factory"),
-        laboratory: buildingUnlocked(state, "laboratory"),
-      };
+      prevUnlocked = snapshotTrackers();
       render.toast("STELLAR REBOOT", `获得 ${gained} Core Data`, "info");
     }
   },
@@ -178,12 +195,7 @@ const handlers: render.Handlers = {
     applyTechUnlocks(imported);
     state = imported;
     prevCounts = { ...state.buildings };
-    prevUnlocked = {
-      miningDrone: buildingUnlocked(state, "miningDrone"),
-      furnace: buildingUnlocked(state, "furnace"),
-      factory: buildingUnlocked(state, "factory"),
-      laboratory: buildingUnlocked(state, "laboratory"),
-    };
+    prevUnlocked = snapshotTrackers();
     saveGame(state);
     return true;
   },
@@ -195,12 +207,7 @@ const handlers: render.Handlers = {
     resetSave();
     state = createNewGame();
     prevCounts = { ...state.buildings };
-    prevUnlocked = {
-      miningDrone: buildingUnlocked(state, "miningDrone"),
-      furnace: buildingUnlocked(state, "furnace"),
-      factory: buildingUnlocked(state, "factory"),
-      laboratory: buildingUnlocked(state, "laboratory"),
-    };
+    prevUnlocked = snapshotTrackers();
   },
   onDebug(action: string) {
     switch (action) {
@@ -223,6 +230,7 @@ const handlers: render.Handlers = {
         break;
       case "unlockBuildings":
         state.buildings.miningDrone = Math.max(1, state.buildings.miningDrone);
+        state.buildings.solarArray = Math.max(1, state.buildings.solarArray);
         state.buildings.furnace = Math.max(1, state.buildings.furnace);
         state.buildings.factory = Math.max(1, state.buildings.factory);
         break;
@@ -238,12 +246,7 @@ const handlers: render.Handlers = {
         state = createNewGame();
         timeScale = 1;
         prevCounts = { ...state.buildings };
-        prevUnlocked = {
-          miningDrone: buildingUnlocked(state, "miningDrone"),
-          furnace: buildingUnlocked(state, "furnace"),
-          factory: buildingUnlocked(state, "factory"),
-          laboratory: buildingUnlocked(state, "laboratory"),
-        };
+        prevUnlocked = snapshotTrackers();
         break;
     }
   },

@@ -184,6 +184,19 @@ function near(a: number, b: number, eps = 1e-6): boolean {
   ok(s.stats.prestigeCount === 1, "prestige count incremented");
 }
 
+// 8b. Prestige cannot be farmed by repeating at the same lifetime credits.
+{
+  const s = createNewGame();
+  s.stats.lifetimeCredits = 500_000; // raw entitlement 10
+  ok(doPrestige(s) === 10, "first prestige grants the full entitlement");
+  ok(pendingCoreData(s) === 0, "nothing pending right after claiming");
+  ok(!canPrestige(s), "cannot prestige again without new credits");
+  s.stats.lifetimeCredits = 2_000_000; // raw entitlement 20 -> delta 10
+  ok(pendingCoreData(s) === 10, "next prestige grants only the delta");
+  ok(doPrestige(s) === 10, "second prestige grants the delta");
+  ok(s.coreData === 20, "coreData totals 20 after two prestiges");
+}
+
 // 9. Offline simulation caps and produces.
 {
   const s = createNewGame();

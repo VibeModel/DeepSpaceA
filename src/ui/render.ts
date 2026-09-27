@@ -30,11 +30,18 @@ import type {
   SellableResource,
   LiveRates,
 } from "../game/types";
-import { formatNumber, formatRate, formatDuration } from "./format";
+import { formatNumber, formatRate, formatDuration, formatPercent } from "./format";
 import { getNumberFormat, getAnimationLevel, type NumberFormat, type AnimationLevel } from "./settings";
 import { deriveVisualParams, toVisualInput, VISUAL } from "./visual";
+import { ACHIEVEMENTS, achievementProgress } from "../game/achievements";
 
-export type TabName = "research" | "automation" | "prestige" | "stats" | "settings";
+export type TabName =
+  | "research"
+  | "automation"
+  | "prestige"
+  | "stats"
+  | "achievements"
+  | "settings";
 
 export interface Handlers {
   onMine(): void;
@@ -91,7 +98,20 @@ const stageRefs: Record<string, {
   utilWrap?: HTMLElement;
   utilBar?: HTMLElement;
   warn?: HTMLElement;
+  input?: HTMLElement;
+  cap?: HTMLElement;
+  utilText?: HTMLElement;
+  eff?: HTMLElement;
 }> = {};
+
+// Power panel refs (supply / demand / percentage / bar).
+const powerRefs: {
+  row?: HTMLElement;
+  supply?: HTMLElement;
+  demand?: HTMLElement;
+  pct?: HTMLElement;
+  bar?: HTMLElement;
+} = {};
 
 const TOPBAR = () => `
   <div class="topbar">
@@ -125,11 +145,17 @@ const debugBlock = import.meta.env.DEV
 
 // Keyboard shortcuts:
 //   Q            = manual mine
-//   A S D F      = buy buildings in list order
+//   A S D F G    = buy buildings in list order (drone / solar / furnace / factory / lab)
 //   W E R        = sell ore / steel / components
 export const MINE_KEY = "Q";
-const BUILDING_KEYS: BuildingId[] = ["miningDrone", "furnace", "factory", "laboratory"];
-const BUY_KEY_CHARS = ["A", "S", "D", "F"];
+const BUILDING_KEYS: BuildingId[] = [
+  "miningDrone",
+  "solarArray",
+  "furnace",
+  "factory",
+  "laboratory",
+];
+const BUY_KEY_CHARS = ["A", "S", "D", "F", "G"];
 const SELL_KEYS: Record<SellableResource, string> = {
   ore: "W",
   steel: "E",
@@ -142,9 +168,10 @@ export const KEY_BINDINGS: Record<
 > = {
   q: { type: "mine" },
   a: { type: "buy", id: "miningDrone" },
-  s: { type: "buy", id: "furnace" },
-  d: { type: "buy", id: "factory" },
-  f: { type: "buy", id: "laboratory" },
+  s: { type: "buy", id: "solarArray" },
+  d: { type: "buy", id: "furnace" },
+  f: { type: "buy", id: "factory" },
+  g: { type: "buy", id: "laboratory" },
   w: { type: "sell", res: "ore" },
   e: { type: "sell", res: "steel" },
   r: { type: "sell", res: "components" },
@@ -216,6 +243,13 @@ function init(handlers: Handlers): void {
           </div>
         </div>
         <div id="resource-readouts"></div>
+        <div class="power-row" id="power-row">
+          <div class="p-head">
+            <span class="p-label">⚡ 电力 Power</span>
+            <span class="p-vals"><span id="p-supply">0</span> / <span id="p-demand">0</span> · <span id="p-pct">100%</span></span>
+          </div>
+          <div class="bar" id="p-bar"><span></span></div>
+        </div>
         <h2 style="margin-top:14px">FLOW</h2>
         <div id="flow"></div>
       </section>
@@ -231,6 +265,7 @@ function init(handlers: Handlers): void {
       <button data-tab="automation">🤖 自动化 Automation</button>
       <button data-tab="prestige">💠 重构 Prestige</button>
       <button data-tab="stats">📈 数据 Statistics</button>
+      <button data-tab="achievements">🏆 成就 Achievements</button>
       <button data-tab="settings">⚙ 设置 Settings</button>
     </div>
     <div class="tab-panel" id="tab-content"></div>
@@ -305,6 +340,10 @@ function init(handlers: Handlers): void {
       <div class="info"><div class="title">${title}</div><div class="sub" data-sub></div></div>
       <div class="rate"><div class="v" data-rate>0/s</div></div>
       ${hasUtil ? `<div class="bar" data-util style="width:120px"><span></span></div>` : ""}
+      ${hasUtil ? `<div class="metrics" data-metrics>
+        <div class="m-row"><span class="m-k">输入</span><span class="m-v" data-min>—</span><span class="m-k">产能</span><span class="m-v" data-mcap>—</span></div>
+        <div class="m-row"><span class="m-k">利用率</span><span class="m-v" data-mutil>—</span><span class="m-k">效率</span><span class="m-v" data-meff>—</span></div>
+      </div>` : ""}
     `;
     flow.appendChild(div);
     if (id !== "research") {
@@ -320,6 +359,10 @@ function init(handlers: Handlers): void {
       utilWrap: hasUtil ? div.querySelector("[data-util]") as HTMLElement : undefined,
       utilBar: hasUtil ? (div.querySelector("[data-util] span") as HTMLElement) : undefined,
       warn: undefined,
+      input: hasUtil ? (div.querySelector("[data-min]") as HTMLElement) : undefined,
+      cap: hasUtil ? (div.querySelector("[data-mcap]") as HTMLElement) : undefined,
+      utilText: hasUtil ? (div.querySelector("[data-mutil]") as HTMLElement) : undefined,
+      eff: hasUtil ? (div.querySelector("[data-meff]") as HTMLElement) : undefined,
     };
     // attach a warning line element under the stage
     const warn = document.createElement("div");
@@ -349,6 +392,13 @@ function init(handlers: Handlers): void {
   }
   // Apply the persisted animation intensity to the document root.
   document.documentElement.dataset.anim = getAnimationLevel();
+
+  // Power panel refs.
+  powerRefs.row = document.getElementById("power-row") ?? undefined;
+  powerRefs.supply = document.getElementById("p-supply") ?? undefined;
+  powerRefs.demand = document.getElementById("p-demand") ?? undefined;
+  powerRefs.pct = document.getElementById("p-pct") ?? undefined;
+  powerRefs.bar = document.getElementById("p-bar") ?? undefined;
 
   // Live stats panel.
   const ls = document.getElementById("live-stats")!;
@@ -409,13 +459,16 @@ function init(handlers: Handlers): void {
       H.onToggleAutoResearch();
       return;
     }
-    const fmtBtn = t.closest("[data-numfmt]");
+    // Match only the settings <button>s. A bare "[data-anim]" would also match
+    // <html data-anim=...> (set by init for the animation level), swallowing the
+    // click for every button that has no earlier data-* branch.
+    const fmtBtn = t.closest("button[data-numfmt]");
     if (fmtBtn) {
       H.onSetNumberFormat((fmtBtn as HTMLElement).dataset.numfmt as NumberFormat);
       tabDirty = true; // re-render settings tab immediately to update highlight
       return;
     }
-    const animBtn = t.closest("[data-anim]");
+    const animBtn = t.closest("button[data-anim]");
     if (animBtn) {
       H.onSetAnimation((animBtn as HTMLElement).dataset.anim as AnimationLevel);
       document.documentElement.dataset.anim = getAnimationLevel(); // take effect now
@@ -433,10 +486,7 @@ function init(handlers: Handlers): void {
     else if (t.id === "btn-import") openImportModal();
     else if (t.id === "btn-reset") openResetModal();
     else if (t.id === "btn-prestige") confirmPrestige();
-    else if (t.id === "btn-prestige-confirm") {
-      H.onPrestige();
-      closeModal();
-    } else if (t.id === "btn-modal-close" || t.id === "modal-backdrop") closeModal();
+    else if (t.id === "btn-modal-close" || t.id === "modal-backdrop") closeModal();
   });
 
   document.getElementById("tabbar")!.addEventListener("click", () => {
@@ -488,16 +538,23 @@ function updateLive(): void {
     const cost = buildingCost(s, b.id);
     ref.cost.innerHTML = `下个花费: <b>${formatNumber(cost)}</b> Credits`;
     ref.buy.disabled = s.resources.credits < cost;
-    // Milestone text.
-    const tiers = milestoneTiers(b.id, owned);
-    const next = nextMilestone(b.id, owned);
-    let mtxt = `里程碑 ${tiers}/${MILESTONES.length}`;
-    if (next !== null) {
-      mtxt += ` · <span class="next">下一个 @ ${next}: ×2 产量</span>`;
+    // Power buildings have no production milestone — show their grid
+    // contribution instead.
+    if (b.category === "power") {
+      const per = b.baseSupply ?? 0;
+      ref.milestone.innerHTML =
+        `☀ 本阵列供电 ${formatRate(owned * per)} · 电网 ${formatPercent(r.powerFactor)}`;
     } else {
-      mtxt += ` · <span class="done">全部达成</span>`;
+      const tiers = milestoneTiers(b.id, owned);
+      const next = nextMilestone(b.id, owned);
+      let mtxt = `里程碑 ${tiers}/${MILESTONES.length}`;
+      if (next !== null) {
+        mtxt += ` · <span class="next">下一个 @ ${next}: ×2 产量</span>`;
+      } else {
+        mtxt += ` · <span class="done">全部达成</span>`;
+      }
+      ref.milestone.innerHTML = mtxt;
     }
-    ref.milestone.innerHTML = mtxt;
 
     // Utilization bar for processor / lab.
     if (ref.utilWrap && ref.utilBar) {
@@ -540,6 +597,13 @@ function updateLive(): void {
   setStageSub("smelting", r, s);
   setStageSub("manufacturing", r, s);
   setStageSub("research", r, s);
+
+  // Structured bottleneck metrics (Input / Capacity / Utilisation / Efficiency).
+  setStageMetrics("smelting", r);
+  setStageMetrics("manufacturing", r);
+
+  // Power grid readout.
+  updatePowerRow(r);
 
   // Live stats.
   const runMs = Date.now() - s.stats.currentRunStart;
@@ -646,64 +710,92 @@ function setStageSub(id: string, r: LiveRates, s: GameState): void {
     return;
   }
   const rate = formatRate;
+  // Brownout-aware capacities so a power shortage is not blamed on raw material.
+  const furnaceCapEff = r.furnaceCap * r.powerFactor;
+  const factoryCapEff = r.factoryCap * r.powerFactor;
+  let txt = "";
 
   if (id === "mining") {
     if (r.furnaceCap <= 0) {
-      el.textContent = "尚无下游熔炼炉";
+      txt = "尚无下游熔炼炉";
     } else {
-      el.textContent =
+      txt =
         r.furnaceCap > r.oreProd * 1.001
           ? `下游需求 ${rate(r.furnaceCap)} · 采矿不足`
           : `下游需求 ${rate(r.furnaceCap)}`;
     }
-    return;
-  }
-
-  if (id === "smelting") {
+  } else if (id === "smelting") {
     if (r.furnaceCap <= 0) {
-      el.textContent = "尚未建造熔炼炉";
-      return;
-    }
-    const util = Math.round(r.furnaceUtil * 100);
-    if (r.oreProd > r.furnaceCap * 1.001) {
-      const have = s.buildings.furnace;
-      const need = Math.max(1, Math.ceil((have * r.oreProd) / r.furnaceCap) - have);
-      el.textContent = `利用率 ${util}% · 铁矿盈余 ${rate(r.oreProd - r.furnaceCap)} · 建议 +${need} 熔炉`;
-    } else if (r.furnaceUtil < 0.99) {
-      el.textContent = `利用率 ${util}% · 铁矿缺口 ${rate(r.furnaceCap - r.oreProd)} · 采矿不足`;
+      txt = "尚未建造熔炼炉";
     } else {
-      el.textContent = `利用率 ${util}% · 满负荷`;
+      const util = Math.round(r.furnaceUtil * 100);
+      if (r.oreProd > furnaceCapEff * 1.001) {
+        const have = s.buildings.furnace;
+        const need = Math.max(1, Math.ceil((have * r.oreProd) / r.furnaceCap) - have);
+        txt = `利用率 ${util}% · 铁矿盈余 ${rate(r.oreProd - furnaceCapEff)} · 建议 +${need} 熔炉`;
+      } else if (r.furnaceUtil < 0.99) {
+        txt = `利用率 ${util}% · 铁矿缺口 ${rate(furnaceCapEff - r.oreProd)} · 采矿不足`;
+      } else {
+        txt = `利用率 ${util}% · 满负荷`;
+      }
     }
-    return;
-  }
-
-  if (id === "manufacturing") {
+  } else if (id === "manufacturing") {
     if (r.factoryCap <= 0) {
-      el.textContent = "尚未建造制造厂";
-      return;
-    }
-    const util = Math.round(r.factoryUtil * 100);
-    if (r.steelProd > r.factoryCap * 1.001) {
-      const have = s.buildings.factory;
-      const need = Math.max(1, Math.ceil((have * r.steelProd) / r.factoryCap) - have);
-      el.textContent = `利用率 ${util}% · 钢材盈余 ${rate(r.steelProd - r.factoryCap)} · 建议 +${need} 制造厂`;
-    } else if (r.factoryUtil < 0.99) {
-      el.textContent = `利用率 ${util}% · 钢材缺口 ${rate(r.factoryCap - r.steelProd)} · 熔炼不足`;
+      txt = "尚未建造制造厂";
     } else {
-      el.textContent = `利用率 ${util}% · 满负荷`;
+      const util = Math.round(r.factoryUtil * 100);
+      if (r.steelProd > factoryCapEff * 1.001) {
+        const have = s.buildings.factory;
+        const need = Math.max(1, Math.ceil((have * r.steelProd) / r.factoryCap) - have);
+        txt = `利用率 ${util}% · 钢材盈余 ${rate(r.steelProd - factoryCapEff)} · 建议 +${need} 制造厂`;
+      } else if (r.factoryUtil < 0.99) {
+        txt = `利用率 ${util}% · 钢材缺口 ${rate(factoryCapEff - r.steelProd)} · 熔炼不足`;
+      } else {
+        txt = `利用率 ${util}% · 满负荷`;
+      }
     }
-    return;
-  }
-
-  if (id === "research") {
+  } else if (id === "research") {
     if (s.buildings.laboratory <= 0) {
-      el.textContent = "尚未建造实验室";
+      txt = "尚未建造实验室";
     } else {
-      el.textContent = r.labActive
+      txt = r.labActive
         ? `研究产出 ${rate(r.researchProd)}`
         : "⚠ 信用点不足，实验室停机";
     }
-    return;
+  }
+
+  // Explain a brownout on any stage it affects.
+  const powerNote =
+    r.powerFactor < 0.995 ? ` · ⚡ 电力 ${formatPercent(r.powerFactor)}` : "";
+  el.textContent = txt + (txt ? powerNote : "");
+}
+
+// Structured bottleneck metrics: Input / Capacity / Utilisation / Efficiency.
+function setStageMetrics(id: "smelting" | "manufacturing", r: LiveRates): void {
+  const ref = stageRefs[id];
+  if (!ref.input || !ref.cap || !ref.utilText || !ref.eff) return;
+  const input = id === "smelting" ? r.furnaceInput : r.factoryInput;
+  const cap = id === "smelting" ? r.furnaceCap : r.factoryCap;
+  const eff = id === "smelting" ? r.furnaceYield : r.factoryYield;
+  ref.input.textContent = formatRate(input);
+  ref.cap.textContent = formatRate(cap);
+  ref.utilText.textContent = formatPercent(cap > 0 ? input / cap : 0);
+  ref.eff.textContent = "×" + eff.toFixed(2);
+}
+
+// Power grid readout (supply / demand / percentage + bar).
+function updatePowerRow(r: LiveRates): void {
+  if (!powerRefs.supply) return;
+  powerRefs.supply.textContent = formatNumber(r.powerSupply);
+  if (powerRefs.demand) powerRefs.demand.textContent = formatNumber(r.powerDemand);
+  if (powerRefs.pct) powerRefs.pct.textContent = formatPercent(r.powerFactor);
+  if (powerRefs.bar) {
+    const pct = Math.round(Math.min(1, r.powerFactor) * 100);
+    powerRefs.bar.firstElementChild?.setAttribute("style", `width:${pct}%`);
+    powerRefs.bar.className = "bar" + (r.powerFactor < 0.995 ? " warn" : " full");
+  }
+  if (powerRefs.row) {
+    powerRefs.row.classList.toggle("deficit", r.powerFactor < 0.995 && r.powerDemand > 0);
   }
 }
 
@@ -719,8 +811,30 @@ function renderTab(): void {
   if (currentTab === "research") el.innerHTML = renderResearch();
   else if (currentTab === "automation") el.innerHTML = renderAutomation();
   else if (currentTab === "prestige") el.innerHTML = renderPrestige();
+  else if (currentTab === "achievements") el.innerHTML = renderAchievements();
   else if (currentTab === "settings") el.innerHTML = renderSettings();
   else el.innerHTML = renderStats();
+}
+
+function renderAchievements(): string {
+  const s = S;
+  const unlockedCount = ACHIEVEMENTS.filter((a) => s.achievements[a.id]).length;
+  let html = `<h3 style="color:var(--accent)">🏆 成就 / Achievements</h3>`;
+  html += `<p style="margin-top:0;color:var(--muted)">已解锁 <b style="color:var(--accent)">${unlockedCount}</b> / ${ACHIEVEMENTS.length}</p>`;
+  html += `<div class="grid-cards">`;
+  for (const a of ACHIEVEMENTS) {
+    const done = !!s.achievements[a.id];
+    const { current, target, pct } = achievementProgress(s, a);
+    const pctText = formatPercent(pct);
+    html += `<div class="ach-card${done ? " done" : " locked"}">
+      <div class="a-head"><span class="a-icon">${a.icon}</span><span class="a-name">${a.name}</span>${done ? `<span class="a-check">✓</span>` : ""}</div>
+      <div class="a-desc">${a.description}</div>
+      <div class="bar"><span style="width:${Math.round(pct * 100)}%"></span></div>
+      <div class="a-progress">${done ? "已达成" : `${formatNumber(current)} / ${formatNumber(target)} · ${pctText}`}</div>
+    </div>`;
+  }
+  html += `</div>`;
+  return html;
 }
 
 function renderResearch(): string {
@@ -813,15 +927,18 @@ function renderPrestige(): string {
   const gain = pendingCoreData(s);
   const can = canPrestige(s);
   let html = `<h3 style="color:var(--accent)">星球重构 / Stellar Reboot</h3>`;
-  html += `<p>累计赚取 Credits: <b>${formatNumber(s.stats.lifetimeCredits)}</b> / 阈值 ${formatNumber(PRESTIGE_THRESHOLD_CREDITS)}</p>`;
+  html += `<p>累计赚取 Credits: <b>${formatNumber(s.stats.lifetimeCredits)}</b>（阈值 ${formatNumber(PRESTIGE_THRESHOLD_CREDITS)}）</p>`;
   html += `<p>重构将重置：铁矿、钢材、零件、信用点、建筑、普通科技与研究。<br>保留：核心数据、永久升级、统计。</p>`;
   html += `<div class="modal" style="border:none;padding:0;max-width:none;background:none"><div class="body" style="margin:0">`;
   html += `<p>立即重构可获得：<b style="color:var(--accent-2);font-size:18px">${formatNumber(gain)} Core Data</b></p>`;
-  html += `<button class="big primary" id="btn-prestige" ${can ? "" : "disabled"}>${can ? "💠 执行重构 Reboot Now" : "未达阈值"}</button>`;
+  const disabledLabel =
+    s.stats.lifetimeCredits < PRESTIGE_THRESHOLD_CREDITS ? "未达阈值" : "暂无新收益";
+  html += `<button class="big primary" id="btn-prestige" ${can ? "" : "disabled"}>${can ? "💠 执行重构 Reboot Now" : disabledLabel}</button>`;
   html += `</div></div>`;
   // Permanent upgrades
   html += `<h3 style="color:var(--accent);margin-top:20px">永久升级 Permanent Upgrades</h3>`;
   html += `<p class="hint">使用 Core Data 购买，跨轮保留。</p>`;
+  html += `<p>当前持有 Core Data：<b style="color:var(--accent-2);font-size:18px">${formatNumber(s.coreData)}</b></p>`;
   html += `<div class="grid-cards">`;
   for (const u of UPGRADE_LIST) {
     const level = upgradeLevel(s, u.id);
@@ -935,6 +1052,10 @@ function renderStats(): string {
     ["建筑购买 Buildings Bought", formatNumber(s.stats.buildingsPurchased)],
     ["重构次数 Prestige Count", formatNumber(s.stats.prestigeCount)],
     ["最佳 Credits/s Best", formatRate(s.stats.bestCreditsPerSec)],
+    [
+      "电力 Power",
+      `${formatNumber(s.rates.powerSupply)} / ${formatNumber(s.rates.powerDemand)} · ${formatPercent(s.rates.powerFactor)}`,
+    ],
     ["核心数据 Core Data", formatNumber(s.coreData)],
   ];
   let html = `<div style="max-width:560px">`;
@@ -953,7 +1074,13 @@ function openModal(inner: string): void {
   backdrop.className = "modal-backdrop";
   backdrop.id = "modal-backdrop";
   backdrop.innerHTML = `<div class="modal">${inner}</div>`;
-  backdrop.addEventListener("click", (e) => {
+  // Dismiss on "mousedown", not "click". Modals are opened from a delegated
+  // "mousedown" handler on #app; the "click" that follows that same press can
+  // land on the freshly-added backdrop (the original button node gets
+  // re-rendered away in between) and would close the modal instantly. Keying
+  // dismissal to the press itself — which must originate on the backdrop —
+  // avoids that race entirely.
+  backdrop.addEventListener("mousedown", (e) => {
     const t = e.target as HTMLElement;
     if (t === backdrop || t.id === "btn-modal-close") closeModal();
   });
@@ -1016,6 +1143,12 @@ function confirmPrestige(): void {
       <button id="btn-modal-close">取消</button>
       <button class="primary" id="btn-prestige-confirm">确认重构</button>
     </div>`);
+  // The modal lives under document.body, outside #app, so the delegated
+  // #app handler never sees it — bind directly (same as reset/import).
+  document.getElementById("btn-prestige-confirm")!.onclick = () => {
+    H.onPrestige();
+    closeModal();
+  };
 }
 
 // ---------- Public API ----------

@@ -7,6 +7,7 @@ import {
   deriveVisualParams,
   type VisualInput,
 } from "../src/ui/visual";
+import type { BuildingId } from "../src/game/types";
 import {
   getAnimationLevel,
   setAnimationLevel,
@@ -38,6 +39,11 @@ function inRange(v: number, lo: number, hi: number, msg: string): void {
   ok(Number.isFinite(v) && v >= lo && v <= hi, `${msg} — got ${v}, want [${lo}, ${hi}]`);
 }
 
+// Building counts with every BuildingId present (so nothing is undefined).
+function bld(over: Partial<Record<BuildingId, number>> = {}): Record<BuildingId, number> {
+  return { miningDrone: 0, solarArray: 0, furnace: 0, factory: 0, laboratory: 0, ...over };
+}
+
 // A blank-slate game: nothing built, nothing produced.
 function blankInput(over: Partial<VisualInput> = {}): VisualInput {
   return {
@@ -50,7 +56,8 @@ function blankInput(over: Partial<VisualInput> = {}): VisualInput {
     steelShortage: false,
     oreAccumulating: false,
     steelAccumulating: false,
-    buildings: { miningDrone: 0, furnace: 0, factory: 0, laboratory: 0 },
+    buildings: bld(),
+    powerFactor: 1,
     analyticsUnlocked: false,
     ...over,
   };
@@ -99,7 +106,7 @@ eq(logNorm(NaN, 1e6).toString(), "0", "logNorm: NaN guard");
       compProd: 1e18,
       researchProd: 1e18,
       creditsRate: 1e18,
-      buildings: { miningDrone: 1e6, furnace: 1e6, factory: 1e6, laboratory: 1e6 },
+      buildings: bld({ miningDrone: 1e6, solarArray: 1e6, furnace: 1e6, factory: 1e6, laboratory: 1e6 }),
       analyticsUnlocked: true,
     }),
   );
@@ -148,7 +155,7 @@ eq(logNorm(NaN, 1e6).toString(), "0", "logNorm: NaN guard");
   let monotonic = true;
   for (const n of [0, 1, 5, 12, 24, 100, 1e6]) {
     const p = deriveVisualParams(
-      blankInput({ buildings: { miningDrone: n, furnace: 0, factory: 0, laboratory: 0 } }),
+      blankInput({ buildings: bld({ miningDrone: n }) }),
     );
     if (p.dotCount < prev || p.dotCount > VISUAL.dotPool) monotonic = false;
     prev = p.dotCount;
@@ -156,7 +163,7 @@ eq(logNorm(NaN, 1e6).toString(), "0", "logNorm: NaN guard");
   ok(monotonic, "dots: monotonic non-decreasing and <= dotPool");
   eq(
     deriveVisualParams(
-      blankInput({ buildings: { miningDrone: VISUAL.buildingDotScale, furnace: 0, factory: 0, laboratory: 0 } }),
+      blankInput({ buildings: bld({ miningDrone: VISUAL.buildingDotScale }) }),
     ).dotCount.toString(),
     VISUAL.dotPool.toString(),
     "dots: full pool at buildingDotScale",
@@ -165,12 +172,20 @@ eq(logNorm(NaN, 1e6).toString(), "0", "logNorm: NaN guard");
 
 // --- hasIndustry / hasRing triggers ---
 {
-  const f = deriveVisualParams(blankInput({ buildings: { miningDrone: 1, furnace: 1, factory: 0, laboratory: 0 } }));
+  const f = deriveVisualParams(blankInput({ buildings: bld({ miningDrone: 1, furnace: 1 }) }));
   eq(f.hasIndustry.toString(), "true", "industry: furnace triggers it");
-  const r = deriveVisualParams(blankInput({ buildings: { miningDrone: 0, furnace: 0, factory: 0, laboratory: 25 } }));
+  const r = deriveVisualParams(blankInput({ buildings: bld({ laboratory: 25 }) }));
   eq(r.hasRing.toString(), "true", "ring: laboratory at threshold triggers it");
-  const r2 = deriveVisualParams(blankInput({ buildings: { miningDrone: 24, furnace: 0, factory: 0, laboratory: 0 } }));
+  const r2 = deriveVisualParams(blankInput({ buildings: bld({ miningDrone: 24 }) }));
   eq(r2.hasRing.toString(), "false", "ring: below threshold stays off");
+}
+
+// --- power brownout drives the amber warning (not gated by analytics) ---
+{
+  const brown = deriveVisualParams(blankInput({ powerFactor: 0.5, analyticsUnlocked: false }));
+  eq(brown.strained.toString(), "true", "power: deficit strains the scene without analytics");
+  const ok = deriveVisualParams(blankInput({ powerFactor: 1 }));
+  eq(ok.strained.toString(), "false", "power: fully supplied is not strained");
 }
 
 // --- settings: animation level round-trip (restores defaults afterwards) ---

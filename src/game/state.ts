@@ -1,6 +1,7 @@
 import { SAVE_VERSION } from "./balance";
 import type { GameState } from "./types";
 import { applyTechUnlocks } from "./research";
+import { emptyAchievementMap } from "./achievements";
 
 // A fresh, empty run (used at new game and after each prestige). Keeps only
 // the fields that should NOT be wiped by a prestige.
@@ -9,7 +10,9 @@ export function freshRunState(): Omit<
   | "version"
   | "coreData"
   | "lifetimeCoreData"
+  | "prestigeGranted"
   | "permanentUpgrades"
+  | "achievements"
   | "stats"
   | "timestamp"
   | "lastTick"
@@ -24,6 +27,7 @@ export function freshRunState(): Omit<
     },
     buildings: {
       miningDrone: 0,
+      solarArray: 0,
       furnace: 0,
       factory: 0,
       laboratory: 0,
@@ -36,6 +40,7 @@ export function freshRunState(): Omit<
       overclockedDrills: 0,
       automatedSmelting: 0,
       automatedAssembly: 0,
+      gridOptimization: 0,
       automatedTrading: 0,
       autoBuyLogic: 0,
       smartLogistics: 0,
@@ -53,6 +58,7 @@ export function freshRunState(): Omit<
     },
     autoBuy: {
       miningDrone: false,
+      solarArray: false,
       furnace: false,
       factory: false,
       laboratory: false,
@@ -76,6 +82,13 @@ export function freshRunState(): Omit<
       researchProd: 0,
       furnaceCap: 0,
       factoryCap: 0,
+      furnaceInput: 0,
+      factoryInput: 0,
+      furnaceYield: 1,
+      factoryYield: 1,
+      powerSupply: 0,
+      powerDemand: 0,
+      powerFactor: 1,
       furnaceUtil: 0,
       factoryUtil: 0,
       labActive: false,
@@ -97,6 +110,8 @@ export function createNewGame(): GameState {
     lastTick: now,
     coreData: 0,
     lifetimeCoreData: 0,
+    prestigeGranted: 0,
+    achievements: emptyAchievementMap(),
     permanentUpgrades: {
       fasterBoot: 0,
       industrialMemory: 0,
