@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "tsx test/core.test.ts && tsx test/format.test.ts"
+    "test": "tsx test/core.test.ts && tsx test/format.test.ts && tsx test/visual.test.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

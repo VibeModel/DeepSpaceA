@@ -1,0 +1,376 @@
+/* =========================================================================
+   Space scene + number-driven animations.
+   The scene root (#space-scene) is the single "data channel": JS writes CSS
+   custom properties onto it (low frequency, ~180ms), and the CSS below
+   interpolates with transitions / looping animations so nothing has to be
+   touched every frame.
+   ========================================================================= */
+
+.space-scene {
+  --glow: 0.25; /* 0..1 planet glow / halo opacity */
+  --activity: 0.15; /* 0..1 surface + orbit liveliness */
+  --breathe-dur: 6s; /* planet breathing period */
+  --orbit-dur: 22s; /* satellite orbit period */
+
+  position: relative;
+  height: 168px;
+  margin: 2px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  isolation: isolate; /* keep mix-blend-mode contained */
+  background: radial-gradient(120% 150% at 50% 128%, #0a1626 0%, #060a12 74%);
+}
+
+.space-scene,
+.space-scene * {
+  pointer-events: none; /* purely decorative, never blocks the UI */
+}
+
+/* ---------- Starfield (static dots, twinkling via layer brightness) ---------- */
+.space-stars {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1px 1px at 12% 30%, #cfe6ff 50%, transparent 51%),
+    radial-gradient(1px 1px at 68% 18%, #9fc4ff 50%, transparent 51%),
+    radial-gradient(1px 1px at 82% 64%, #ffffff 50%, transparent 51%),
+    radial-gradient(1px 1px at 24% 72%, #bcd8ff 50%, transparent 51%),
+    radial-gradient(1px 1px at 45% 12%, #ffffff 50%, transparent 51%),
+    radial-gradient(1px 1px at 90% 34%, #cfe6ff 50%, transparent 51%),
+    radial-gradient(1px 1px at 8% 56%, #8fb7ff 50%, transparent 51%),
+    radial-gradient(1px 1px at 58% 82%, #ffffff 50%, transparent 51%);
+  opacity: calc(0.3 + var(--glow) * 0.55);
+  transition: opacity 400ms linear;
+  animation: starTwinkle 7s ease-in-out infinite;
+}
+@keyframes starTwinkle {
+  0%, 100% { filter: brightness(0.85); }
+  50% { filter: brightness(1.2); }
+}
+
+/* Centering context for every planet layer. */
+.planet-system {
+  position: absolute;
+  inset: 0;
+}
+
+/* ---------- Atmospheric halo ---------- */
+.planet-halo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 208px;
+  height: 208px;
+  margin: -104px 0 0 -104px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(92, 196, 255, 0.3) 0%,
+    rgba(92, 196, 255, 0.1) 44%,
+    transparent 68%
+  );
+  opacity: var(--glow);
+  transition: opacity 400ms linear, background 400ms linear;
+  mix-blend-mode: screen;
+}
+
+/* ---------- Planet body ---------- */
+.planet {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 104px;
+  height: 104px;
+  margin: -52px 0 0 -52px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 34% 30%,
+    #7fd7ff 0%,
+    #2b7fa8 22%,
+    #14405c 56%,
+    #071726 100%
+  );
+  box-shadow:
+    inset -12px -10px 26px rgba(0, 0, 0, 0.78),
+    inset 8px 8px 20px rgba(140, 225, 255, 0.18);
+  filter: brightness(calc(0.72 + var(--glow) * 0.5)) saturate(calc(0.85 + var(--glow) * 0.3));
+  transition: filter 400ms linear;
+  animation: planetBreathe var(--breathe-dur) ease-in-out infinite;
+}
+@keyframes planetBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.018); }
+}
+
+/* Continents / oceans approximated with soft blended blobs. */
+.planet-surface {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+  background-image:
+    radial-gradient(30% 22% at 40% 62%, rgba(90, 200, 170, 0.55), transparent 70%),
+    radial-gradient(24% 18% at 66% 40%, rgba(80, 180, 150, 0.45), transparent 70%),
+    radial-gradient(18% 14% at 28% 34%, rgba(110, 210, 180, 0.4), transparent 70%),
+    radial-gradient(26% 20% at 58% 74%, rgba(70, 160, 190, 0.35), transparent 72%);
+  opacity: calc(0.35 + var(--activity) * 0.5);
+  transition: opacity 500ms linear;
+}
+
+/* Drifting cloud bands. */
+.planet-clouds {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+  background-image: repeating-linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0.07) 0 6px,
+    transparent 6px 24px
+  );
+  background-size: 260px 260px;
+  opacity: 0.5;
+  animation: cloudDrift 60s linear infinite;
+}
+@keyframes cloudDrift {
+  to { background-position: 260px 0; }
+}
+
+/* Terminator / rim light accent. */
+.planet-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: inset -2px -2px 10px rgba(0, 0, 0, 0.55), inset 3px 3px 9px rgba(160, 230, 255, 0.22);
+}
+
+/* ---------- On-planet light pool (base lights) ---------- */
+.base-lights {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  overflow: hidden;
+}
+.base-lights .dot {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 5px var(--accent);
+  opacity: 0;
+  transform: scale(0.5);
+  transition: opacity 300ms ease, transform 300ms ease;
+}
+.base-lights .dot.on {
+  opacity: calc(0.4 + var(--activity) * 0.6);
+  transform: scale(1);
+  animation: lightFlicker 2.8s ease-in-out infinite;
+}
+.base-lights .dot:nth-child(3n + 1).on { animation-delay: -0.7s; }
+.base-lights .dot:nth-child(3n + 2).on { animation-delay: -1.6s; }
+.base-lights .dot:nth-child(3n).on { animation-delay: -2.3s; }
+@keyframes lightFlicker {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* ---------- Orbits & satellites ---------- */
+.orbit {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 50%;
+  border: 1px dashed rgba(91, 141, 239, 0.3);
+  animation: orbitSpin var(--orbit-dur) linear infinite;
+}
+.orbit-inner {
+  width: 152px;
+  height: 152px;
+  margin: -76px 0 0 -76px;
+}
+.orbit-outer {
+  display: none;
+  width: 210px;
+  height: 210px;
+  margin: -105px 0 0 -105px;
+  opacity: 0.7;
+  animation-direction: reverse;
+  animation-duration: calc(var(--orbit-dur) * 1.7);
+}
+.space-scene[data-industry="1"] .orbit-outer {
+  display: block;
+}
+.orbit .sat {
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  box-shadow: 0 0 8px var(--accent-2);
+}
+@keyframes orbitSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- Planetary ring (unlocks at the first milestone tier) ---------- */
+.planet-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 172px;
+  height: 172px;
+  margin: -86px 0 0 -86px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: rgba(150, 205, 255, 0.4);
+  border-bottom-color: rgba(150, 205, 255, 0.18);
+  transform: rotateX(74deg) rotateZ(-16deg) scale(1.06);
+  opacity: 0;
+  transition: opacity 600ms ease;
+}
+.space-scene[data-ring="1"] .planet-ring {
+  opacity: 0.85;
+  animation: ringGlow 7s ease-in-out infinite;
+}
+@keyframes ringGlow {
+  0%, 100% { filter: brightness(0.85); }
+  50% { filter: brightness(1.2); }
+}
+
+/* ---------- Bottleneck warning (amber) ---------- */
+.space-scene[data-strain="1"] .planet-halo {
+  background: radial-gradient(circle, rgba(245, 166, 35, 0.3) 0%, transparent 66%);
+  animation: strainPulse 1.8s ease-in-out infinite;
+}
+@keyframes strainPulse {
+  0%, 100% { opacity: calc(var(--glow) * 0.7); }
+  50% { opacity: 1; }
+}
+
+/* ---------- One-shot celebration (milestone / unlock) ---------- */
+.space-scene.celebrate .planet-halo {
+  animation: sceneBurst 900ms ease-out;
+}
+@keyframes sceneBurst {
+  0% { opacity: 0.2; transform: scale(0.65); }
+  40% { opacity: 1; transform: scale(1.25); }
+  100% { opacity: var(--glow); transform: scale(1); }
+}
+
+/* =========================================================================
+   Number-driven feedback on existing UI
+   ========================================================================= */
+
+/* Pipeline sweep: a translucent highlight travelling across each stage, its
+   speed set per stage by --flow-dur (faster with higher throughput). */
+.flow-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(56, 225, 196, 0.14), transparent);
+  transform: translateX(-100%);
+  animation: flowSweep var(--flow-dur, 2.4s) linear infinite;
+  pointer-events: none;
+}
+@keyframes flowSweep {
+  to { transform: translateX(100%); }
+}
+
+/* Arrows nudge downward at the panel's overall flow speed. */
+.flow-arrow {
+  animation: arrowPulse var(--flow-dur, 2.4s) ease-in-out infinite;
+}
+@keyframes arrowPulse {
+  0%, 100% { opacity: 0.4; transform: translateY(-1px); }
+  50% { opacity: 0.95; transform: translateY(1px); }
+}
+
+/* Purchase feedback: card pop + count bump. */
+.building.bought {
+  animation: cardPop 340ms ease-out;
+}
+@keyframes cardPop {
+  0% { transform: scale(1); box-shadow: 0 0 0 rgba(56, 225, 196, 0); }
+  35% { transform: scale(1.03); box-shadow: 0 0 16px rgba(56, 225, 196, 0.45); }
+  100% { transform: scale(1); box-shadow: 0 0 0 rgba(56, 225, 196, 0); }
+}
+.building .count.bump {
+  animation: countBump 360ms ease-out;
+}
+@keyframes countBump {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.35); color: #8ff3e2; }
+  100% { transform: scale(1); }
+}
+.count {
+  display: inline-block;
+}
+
+/* New system unlocked: brief glow on the building card. */
+.building.unlocked {
+  animation: unlockedPop 1.2s ease-out;
+}
+@keyframes unlockedPop {
+  0% { border-color: var(--border); }
+  25% { border-color: var(--accent); box-shadow: 0 0 18px rgba(56, 225, 196, 0.5); }
+  100% { border-color: var(--border); box-shadow: none; }
+}
+
+/* Top-bar credits pulse while income is flowing. */
+.topbar[data-active="1"] #r-credits {
+  animation: creditPulse var(--credit-dur, 2.6s) ease-in-out infinite;
+}
+@keyframes creditPulse {
+  0%, 100% { opacity: 1; text-shadow: none; }
+  50% { opacity: 0.82; text-shadow: 0 0 10px rgba(56, 225, 196, 0.6); }
+}
+
+/* =========================================================================
+   Animation intensity levels
+   ========================================================================= */
+
+/* Off: kill every scene / number animation (state colours remain). */
+:root[data-anim="off"] .space-scene,
+:root[data-anim="off"] .space-scene *,
+:root[data-anim="off"] .resource-row .val,
+:root[data-anim="off"] .flow-stage::after,
+:root[data-anim="off"] .flow-arrow,
+:root[data-anim="off"] .topbar[data-active="1"] #r-credits {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Subtle: keep the static planet, calm everything moving. */
+:root[data-anim="subtle"] .space-scene {
+  --breathe-dur: 9s;
+}
+:root[data-anim="subtle"] .base-lights .dot.on,
+:root[data-anim="subtle"] .space-stars,
+:root[data-anim="subtle"] .planet-ring,
+:root[data-anim="subtle"] .planet-clouds,
+:root[data-anim="subtle"] .flow-stage::after,
+:root[data-anim="subtle"] .flow-arrow,
+:root[data-anim="subtle"] .topbar[data-active="1"] #r-credits {
+  animation: none !important;
+}
+
+/* System accessibility preference wins over the user's level. */
+@media (prefers-reduced-motion: reduce) {
+  .space-scene,
+  .space-scene *,
+  .resource-row .val,
+  .flow-stage::after,
+  .flow-arrow,
+  .building.bought,
+  .building .count.bump,
+  .building.unlocked,
+  .topbar[data-active="1"] #r-credits {
+    animation: none !important;
+    transition: none !important;
+  }
+}

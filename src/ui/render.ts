@@ -31,7 +31,8 @@ import type {
   LiveRates,
 } from "../game/types";
 import { formatNumber, formatRate, formatDuration } from "./format";
-import { getNumberFormat, type NumberFormat } from "./settings";
+import { getNumberFormat, getAnimationLevel, type NumberFormat, type AnimationLevel } from "./settings";
+import { deriveVisualParams, toVisualInput, VISUAL } from "./visual";
 
 export type TabName = "research" | "automation" | "prestige" | "stats" | "settings";
 
@@ -47,6 +48,7 @@ export interface Handlers {
   onPrestige(): void;
   onSetTab(tab: TabName): void;
   onSetNumberFormat(fmt: NumberFormat): void;
+  onSetAnimation(level: AnimationLevel): void;
   onExport(): string;
   onImport(code: string): boolean;
   onManualSave(): void;
@@ -60,6 +62,16 @@ let currentTab: TabName = "research";
 let tabDirty = true;
 let lastTabRender = 0;
 
+// Visual-scene state. The scene root is the single place where number-driven
+// CSS variables are written, and only every VISUAL_INTERVAL ms.
+let sceneRef: HTMLElement | null = null;
+let prodPanelRef: HTMLElement | null = null;
+let topbarRef: HTMLElement | null = null;
+let lightRefs: HTMLElement[] = [];
+const VISUAL_INTERVAL = 180;
+let lastVisual = 0;
+let lastDotCount = -1;
+
 // Cached element references for the high-frequency live panels.
 const refs: Record<string, HTMLElement> = {};
 const buildingRefs: Record<string, {
@@ -71,8 +83,9 @@ const buildingRefs: Record<string, {
   utilWrap?: HTMLElement;
   utilBar?: HTMLElement;
 }> = {};
-const resRefs: Record<string, { val: HTMLElement; delta: HTMLElement }> = {};
+const resRefs: Record<string, { row: HTMLElement; val: HTMLElement; delta: HTMLElement }> = {};
 const stageRefs: Record<string, {
+  root: HTMLElement;
   rate: HTMLElement;
   sub: HTMLElement;
   utilWrap?: HTMLElement;
@@ -187,6 +200,21 @@ function init(handlers: Handlers): void {
 
       <section class="panel" id="panel-production">
         <h2>PRODUCTION</h2>
+        <div class="space-scene" id="space-scene" data-strain="0" data-industry="0" data-ring="0" aria-hidden="true">
+          <div class="space-stars"></div>
+          <div class="planet-system">
+            <div class="planet-halo"></div>
+            <div class="orbit orbit-inner"><span class="sat"></span></div>
+            <div class="orbit orbit-outer"><span class="sat"></span></div>
+            <div class="planet">
+              <div class="planet-surface"></div>
+              <div class="planet-clouds"></div>
+              <div class="planet-rim"></div>
+              <div class="base-lights" id="base-lights"></div>
+            </div>
+            <div class="planet-ring"></div>
+          </div>
+        </div>
         <div id="resource-readouts"></div>
         <h2 style="margin-top:14px">FLOW</h2>
         <div id="flow"></div>
@@ -255,6 +283,7 @@ function init(handlers: Handlers): void {
     row.innerHTML = `<span class="name">${name}</span><span><span class="val" data-v></span> <span class="delta" data-d></span></span>`;
     rr.appendChild(row);
     resRefs[id] = {
+      row,
       val: row.querySelector("[data-v]")!,
       delta: row.querySelector("[data-d]")!,
     };
@@ -285,6 +314,7 @@ function init(handlers: Handlers): void {
       flow.appendChild(arrow);
     }
     stageRefs[id] = {
+      root: div,
       rate: div.querySelector("[data-rate]")!,
       sub: div.querySelector("[data-sub]")!,
       utilWrap: hasUtil ? div.querySelector("[data-util]") as HTMLElement : undefined,
@@ -297,6 +327,28 @@ function init(handlers: Handlers): void {
     flow.appendChild(warn);
     stageRefs[id].warn = warn;
   }
+
+  // Space scene: cache refs and build the fixed light-dot pool exactly once.
+  // The pool size must match VISUAL.dotPool.
+  sceneRef = document.getElementById("space-scene");
+  prodPanelRef = document.getElementById("panel-production");
+  topbarRef = document.querySelector<HTMLElement>(".topbar");
+  const lights = document.getElementById("base-lights")!;
+  lightRefs = [];
+  const DOT_POS: [number, number][] = [
+    [46, 38], [38, 52], [55, 60], [62, 44], [30, 44], [50, 72], [64, 66],
+    [42, 26], [58, 30], [34, 62], [50, 50], [68, 54], [44, 82], [26, 56],
+  ];
+  for (const [x, y] of DOT_POS.slice(0, VISUAL.dotPool)) {
+    const d = document.createElement("span");
+    d.className = "dot";
+    d.style.left = `${x}%`;
+    d.style.top = `${y}%`;
+    lights.appendChild(d);
+    lightRefs.push(d);
+  }
+  // Apply the persisted animation intensity to the document root.
+  document.documentElement.dataset.anim = getAnimationLevel();
 
   // Live stats panel.
   const ls = document.getElementById("live-stats")!;
@@ -363,6 +415,13 @@ function init(handlers: Handlers): void {
       tabDirty = true; // re-render settings tab immediately to update highlight
       return;
     }
+    const animBtn = t.closest("[data-anim]");
+    if (animBtn) {
+      H.onSetAnimation((animBtn as HTMLElement).dataset.anim as AnimationLevel);
+      document.documentElement.dataset.anim = getAnimationLevel(); // take effect now
+      tabDirty = true; // re-render settings tab immediately to update highlight
+      return;
+    }
     const dbg = t.closest("[data-debug]");
     if (dbg) {
       H.onDebug((dbg as HTMLElement).dataset.debug!);
@@ -407,6 +466,9 @@ function updateLive(): void {
     const sign = net >= 0 ? "+" : "";
     ref.delta.textContent = `${sign}${formatRate(net)}`;
     ref.delta.className = "delta " + (net >= 0 ? "pos" : "neg");
+    // Direction-driven pulse on the value (number-driven feedback).
+    const dir = net > 1e-9 ? "up" : net < -1e-9 ? "down" : "flat";
+    if (ref.row.dataset.flow !== dir) ref.row.dataset.flow = dir;
   }
 
   // Buildings.
@@ -487,6 +549,65 @@ function updateLive(): void {
   document.getElementById("ls-comp")!.textContent = formatRate(r.compProd);
   document.getElementById("ls-credits")!.textContent = formatRate(r.credits);
   document.getElementById("ls-research")!.textContent = formatRate(r.researchProd);
+
+  // Drive the planet scene / number animations (throttled internally).
+  updateVisuals();
+}
+
+// Push live numbers into CSS custom properties on the scene root, at a low
+// frequency so CSS transitions/looping animations do the smoothing. Nothing
+// here writes per frame.
+function updateVisuals(): void {
+  const root = sceneRef;
+  if (!root) return;
+  const now = performance.now();
+  if (now - lastVisual < VISUAL_INTERVAL) return;
+  lastVisual = now;
+
+  const p = deriveVisualParams(toVisualInput(S));
+  const set = (k: string, v: string) => root.style.setProperty(k, v);
+
+  set("--glow", p.glow.toFixed(3));
+  set("--activity", p.activity.toFixed(3));
+  set("--breathe-dur", p.breatheDur.toFixed(2) + "s");
+  set("--orbit-dur", p.orbitDur.toFixed(2) + "s");
+
+  const strain = p.strained ? "1" : "0";
+  if (root.dataset.strain !== strain) root.dataset.strain = strain;
+  const industry = p.hasIndustry ? "1" : "0";
+  if (root.dataset.industry !== industry) root.dataset.industry = industry;
+  const ring = p.hasRing ? "1" : "0";
+  if (root.dataset.ring !== ring) root.dataset.ring = ring;
+
+  // Light pool: only touch the DOM when the count actually changes.
+  if (p.dotCount !== lastDotCount) {
+    for (let i = 0; i < lightRefs.length; i++) {
+      lightRefs[i].classList.toggle("on", i < p.dotCount);
+    }
+    lastDotCount = p.dotCount;
+  }
+
+  // Per-stage pipeline sweep speed.
+  stageRefs.mining.root.style.setProperty("--flow-dur", p.flowDur.mining.toFixed(2) + "s");
+  stageRefs.smelting.root.style.setProperty("--flow-dur", p.flowDur.smelting.toFixed(2) + "s");
+  stageRefs.manufacturing.root.style.setProperty("--flow-dur", p.flowDur.manufacturing.toFixed(2) + "s");
+  stageRefs.research.root.style.setProperty("--flow-dur", p.flowDur.research.toFixed(2) + "s");
+
+  // Arrows share a panel-level sweep speed (use the slowest active stage).
+  const panelFlow = Math.max(
+    p.flowDur.mining,
+    p.flowDur.smelting,
+    p.flowDur.manufacturing,
+    p.flowDur.research,
+  );
+  prodPanelRef?.style.setProperty("--flow-dur", panelFlow.toFixed(2) + "s");
+
+  // Top-bar credits pulse.
+  if (topbarRef) {
+    topbarRef.style.setProperty("--credit-dur", p.creditDur.toFixed(2) + "s");
+    const active = p.creditActive ? "1" : "0";
+    if (topbarRef.dataset.active !== active) topbarRef.dataset.active = active;
+  }
 }
 
 function setStage(
@@ -766,6 +887,38 @@ function renderSettings(): string {
     <div class="udesc">3.3×10²¹¹ → <b>${formatNumber(3.3e211)}</b></div>
     <div class="udesc">42 → <b>${formatNumber(42)}</b></div>
   </div>`;
+
+  // Animation intensity.
+  const animLevel = getAnimationLevel();
+  const animOptions: { id: AnimationLevel; title: string; desc: string }[] = [
+    {
+      id: "rich",
+      title: "中等·生动 Rich",
+      desc: "星球呼吸、流水线流动、数值脉冲与购买弹跳全开（随产量变化）。",
+    },
+    {
+      id: "subtle",
+      title: "克制 Subtle",
+      desc: "保留静态星球与数值颜色提示，停掉闪烁、流动与脉冲。",
+    },
+    {
+      id: "off",
+      title: "关闭 Off",
+      desc: "完全静止；仅保留数值颜色与统计信息。",
+    },
+  ];
+  html += `<h4 style="margin:18px 0 6px">动画 Animation</h4>`;
+  html += `<p class="hint" style="margin-top:0">控制界面动效强度，不影响任何游戏数值；系统"减少动态效果"优先。</p>`;
+  html += `<div class="grid-cards">`;
+  for (const o of animOptions) {
+    const active = o.id === animLevel;
+    html += `<div class="up-card${active ? " selected" : ""}">
+      <div class="uname">${o.title}${active ? " ✓" : ""}</div>
+      <div class="udesc">${o.desc}</div>
+      <button class="${active ? "" : "primary"}" data-anim="${o.id}" ${active ? "disabled" : ""}>${active ? "使用中" : "选择"}</button>
+    </div>`;
+  }
+  html += `</div>`;
   return html;
 }
 
@@ -931,4 +1084,40 @@ export function feedbackMine(amount: number): void {
     oreRow.classList.add("flash");
     setTimeout(() => oreRow.classList.remove("flash"), 500);
   }
+}
+
+// Visual feedback for a successful building purchase: card pop + count bump.
+export function feedbackPurchase(id: BuildingId): void {
+  const ref = buildingRefs[id];
+  if (!ref) return;
+  ref.root.classList.remove("bought");
+  void ref.root.offsetWidth; // restart animation
+  ref.root.classList.add("bought");
+  ref.count.classList.remove("bump");
+  void ref.count.offsetWidth;
+  ref.count.classList.add("bump");
+  setTimeout(() => {
+    ref.root.classList.remove("bought");
+    ref.count.classList.remove("bump");
+  }, 400);
+}
+
+// One-shot celebration on the planet scene (milestone reached / unlock).
+export function celebrateScene(): void {
+  const root = sceneRef;
+  if (!root) return;
+  root.classList.remove("celebrate");
+  void root.offsetWidth;
+  root.classList.add("celebrate");
+  setTimeout(() => root.classList.remove("celebrate"), 950);
+}
+
+// Brief glow on a building card, e.g. when a new system unlocks.
+export function highlightBuilding(id: BuildingId): void {
+  const ref = buildingRefs[id];
+  if (!ref) return;
+  ref.root.classList.remove("unlocked");
+  void ref.root.offsetWidth;
+  ref.root.classList.add("unlocked");
+  setTimeout(() => ref.root.classList.remove("unlocked"), 1250);
 }

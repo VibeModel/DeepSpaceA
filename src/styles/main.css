@@ -269,6 +269,8 @@ button.big {
   border-radius: 8px;
   margin-bottom: 6px;
   background: var(--panel-2);
+  position: relative;
+  overflow: hidden;
 }
 .flow-stage .icon {
   font-size: 22px;
@@ -576,7 +578,7 @@ textarea {
   pointer-events: none;
   font-weight: 700;
   font-size: 15px;
-  color: var(--accent-1);
+  color: var(--accent);
   text-shadow: 0 0 6px rgba(0, 229, 255, 0.6);
   animation: floatUp 0.8s ease-out forwards;
   z-index: 50;
@@ -592,6 +594,22 @@ textarea {
   animation: flashPulse 0.5s ease-out;
 }
 @keyframes flashPulse {
-  0% { color: var(--accent-1); text-shadow: 0 0 10px rgba(0, 229, 255, 0.8); }
+  0% { color: var(--accent); text-shadow: 0 0 10px rgba(0, 229, 255, 0.8); }
   100% { color: inherit; text-shadow: none; }
+}
+
+/* Direction-driven pulse on resource values (number-driven feedback). */
+.resource-row[data-flow="up"] .val {
+  animation: valueRise var(--pulse-dur, 2.4s) ease-in-out infinite;
+}
+.resource-row[data-flow="down"] .val {
+  animation: valueFall var(--pulse-dur, 2.4s) ease-in-out infinite;
+}
+@keyframes valueRise {
+  0%, 100% { text-shadow: none; }
+  50% { text-shadow: 0 0 8px rgba(79, 209, 122, 0.55); }
+}
+@keyframes valueFall {
+  0%, 100% { text-shadow: none; }
+  50% { text-shadow: 0 0 8px rgba(255, 92, 92, 0.55); }
 }

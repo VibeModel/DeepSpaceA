@@ -1,4 +1,5 @@
 import "./styles/main.css";
+import "./styles/space.css";
 import { createNewGame } from "./game/state";
 import {
   loadGame,
@@ -23,7 +24,7 @@ import { doPrestige } from "./game/prestige";
 import { MILESTONES, AUTOSAVE_MS, MANUAL_MINE_AMOUNT, TECHS, UPGRADES } from "./game/balance";
 import type { GameState, BuildingId, SellableResource, TechId, UpgradeId } from "./game/types";
 import * as render from "./ui/render";
-import { loadUiSettings, setNumberFormat, type NumberFormat } from "./ui/settings";
+import { loadUiSettings, setNumberFormat, setAnimationLevel, type NumberFormat, type AnimationLevel } from "./ui/settings";
 
 // Apply persisted UI preferences (number format) before any number is rendered.
 loadUiSettings();
@@ -58,6 +59,8 @@ function detectMilestones(): void {
             `${id} 达到 ${m} → 产量 ×2`,
             "warn",
           );
+          render.celebrateScene();
+          render.highlightBuilding(id);
         }
       }
     }
@@ -66,6 +69,8 @@ function detectMilestones(): void {
     const nowU = buildingUnlocked(state, id);
     if (!wasU && nowU && id !== "miningDrone") {
       render.toast("NEW SYSTEM", buildingName(id), "info");
+      render.celebrateScene();
+      render.highlightBuilding(id);
     }
     prevCounts[id] = after;
     prevUnlocked[id] = nowU;
@@ -116,7 +121,7 @@ const handlers: render.Handlers = {
     sellResource(state, res, 1);
   },
   onBuyBuilding(id: BuildingId) {
-    buyBuilding(state, id);
+    if (buyBuilding(state, id)) render.feedbackPurchase(id);
   },
   onBuyTech(id: TechId) {
     if (researchTech(state, id)) {
@@ -160,6 +165,9 @@ const handlers: render.Handlers = {
   },
   onSetNumberFormat(fmt: NumberFormat) {
     setNumberFormat(fmt); // also persists to localStorage
+  },
+  onSetAnimation(level: AnimationLevel) {
+    setAnimationLevel(level); // also persists to localStorage
   },
   onExport() {
     return exportSave(state);
