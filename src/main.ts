@@ -22,9 +22,25 @@ import {
 import { researchTech, applyTechUnlocks, techLevel } from "./game/research";
 import { buyUpgrade, upgradeLevel } from "./game/upgrades";
 import { doPrestige } from "./game/prestige";
+import {
+  planetUnlocked,
+  PLANET_LIST,
+  getPlanet,
+  getRegion,
+  regionLevel,
+  upgradeRegion,
+} from "./game/planets";
 import { evaluateAchievements, getAchievement } from "./game/achievements";
 import { MILESTONES, AUTOSAVE_MS, MANUAL_MINE_AMOUNT, TECHS, UPGRADES } from "./game/balance";
-import type { GameState, BuildingId, SellableResource, TechId, UpgradeId } from "./game/types";
+import type {
+  GameState,
+  BuildingId,
+  SellableResource,
+  TechId,
+  UpgradeId,
+  PlanetId,
+  RegionId,
+} from "./game/types";
 import * as render from "./ui/render";
 import { loadUiSettings, setNumberFormat, setAnimationLevel, type NumberFormat, type AnimationLevel } from "./ui/settings";
 
@@ -43,6 +59,7 @@ let timeScale = 1;
 let lastAutosave = Date.now();
 let prevCounts: Record<BuildingId, number> = { ...state.buildings };
 let prevUnlocked: Record<BuildingId, boolean> = snapshotTrackers();
+let prevPlanetUnlocked: Record<PlanetId, boolean> = snapshotPlanetUnlocks();
 
 // Per-building unlock flags, used to detect newly unlocked systems. Centralised
 // so that adding a building never misses a hardcoded copy.
@@ -52,6 +69,26 @@ function snapshotTrackers(): Record<BuildingId, boolean> {
     out[id] = buildingUnlocked(state, id);
   }
   return out;
+}
+
+// Planet unlock is derived from persistent stats, so track the previous frame's
+// set to fire a toast only on the transition.
+function snapshotPlanetUnlocks(): Record<PlanetId, boolean> {
+  const out = {} as Record<PlanetId, boolean>;
+  for (const p of PLANET_LIST) out[p.id] = planetUnlocked(state, p.id);
+  return out;
+}
+
+function detectPlanetUnlocks(): void {
+  for (const p of PLANET_LIST) {
+    const was = prevPlanetUnlocked[p.id];
+    const now = planetUnlocked(state, p.id);
+    if (!was && now) {
+      render.toast("PLANET UNLOCKED", `${p.icon} ${p.name} 已解锁`, "info");
+      render.celebrateScene();
+    }
+    prevPlanetUnlocked[p.id] = now;
+  }
 }
 
 function detectMilestones(): void {
@@ -118,6 +155,7 @@ function loop(): void {
   simulate(state, dt * timeScale);
   detectMilestones();
   detectAchievements();
+  detectPlanetUnlocks();
 
   if (realNow - lastAutosave > AUTOSAVE_MS) {
     saveGame(state);
@@ -167,14 +205,35 @@ const handlers: render.Handlers = {
   onToggleAutoResearch() {
     state.autoResearch = !state.autoResearch;
   },
-  onPrestige() {
-    const gained = doPrestige(state);
+  onPrestige(dest: PlanetId) {
+    const gained = doPrestige(state, dest);
     if (gained > 0) {
       saveGame(state);
       // Reset detection trackers for the new run.
       prevCounts = { ...state.buildings };
       prevUnlocked = snapshotTrackers();
-      render.toast("STELLAR REBOOT", `获得 ${gained} Core Data`, "info");
+      prevPlanetUnlocked = snapshotPlanetUnlocks();
+      const p = getPlanet(state.planet);
+      render.toast("STELLAR REBOOT", `获得 ${gained} Core Data · 着陆 ${p.icon} ${p.name}`, "info");
+      render.celebrateScene();
+    }
+  },
+  onSelectPlanet(id: PlanetId) {
+    if (!planetUnlocked(state, id)) return;
+    state.nextPlanet = id;
+    saveGame(state);
+    const p = getPlanet(id);
+    render.toast("DESTINATION SET", `下次重构目的地：${p.icon} ${p.name}`, "info");
+  },
+  onUpgradeRegion(id: RegionId) {
+    if (upgradeRegion(state, id)) {
+      render.feedbackRegion(id);
+      saveGame(state);
+      render.toast(
+        "REGION UPGRADED",
+        `${getRegion(id).name} → Lv.${regionLevel(state, id)}`,
+        "info",
+      );
     }
   },
   onSetTab() {
@@ -196,6 +255,7 @@ const handlers: render.Handlers = {
     state = imported;
     prevCounts = { ...state.buildings };
     prevUnlocked = snapshotTrackers();
+    prevPlanetUnlocked = snapshotPlanetUnlocks();
     saveGame(state);
     return true;
   },
@@ -208,6 +268,7 @@ const handlers: render.Handlers = {
     state = createNewGame();
     prevCounts = { ...state.buildings };
     prevUnlocked = snapshotTrackers();
+    prevPlanetUnlocked = snapshotPlanetUnlocks();
   },
   onDebug(action: string) {
     switch (action) {
@@ -241,12 +302,18 @@ const handlers: render.Handlers = {
         );
         render.toast("DEBUG", "Prestige 已解锁", "warn");
         break;
+      case "unlockPlanets":
+        state.stats.prestigeCount = Math.max(state.stats.prestigeCount, 3);
+        state.lifetimeCoreData = Math.max(state.lifetimeCoreData, 80);
+        render.toast("DEBUG", "所有星球已解锁", "warn");
+        break;
       case "wipe":
         resetSave();
         state = createNewGame();
         timeScale = 1;
         prevCounts = { ...state.buildings };
         prevUnlocked = snapshotTrackers();
+        prevPlanetUnlocked = snapshotPlanetUnlocks();
         break;
     }
   },

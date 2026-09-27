@@ -326,6 +326,109 @@ export const TECHS = {
   },
 } as const;
 
+// Planets. A planet applies a set of multiplicative modifiers for the whole run.
+// Switching planets is done ONLY through a prestige (see prestige.ts), so the
+// player cannot cherry-pick a mining bonus while mining and a research bonus
+// while researching within the same run.
+export const PLANETS = {
+  homeworld: {
+    id: "homeworld" as const,
+    name: "母星 / Homeworld",
+    icon: "🌍",
+    description: "起始星球，无特殊修正，均衡稳定。",
+    modifiers: {},
+    unlock: {},
+  },
+  ferrum: {
+    id: "ferrum" as const,
+    name: "铁锈星 / Ferrum",
+    icon: "⛏",
+    description: "富铁矿脉：采矿 ×1.6，但大气尘埃削弱供电 ×0.75。",
+    modifiers: { miningMult: 1.6, powerSupplyMult: 0.75 },
+    unlock: { prestigeCount: 1 },
+  },
+  pyra: {
+    id: "pyra" as const,
+    name: "熔火星 / Pyra",
+    icon: "🔥",
+    description: "炽热地核：熔炼 ×1.5，但严酷环境使建筑成本 ×1.15。",
+    modifiers: { smeltMult: 1.5, costMult: 1.15 },
+    unlock: { prestigeCount: 3 },
+  },
+  cryon: {
+    id: "cryon" as const,
+    name: "冰寒星 / Cryon",
+    icon: "🔬",
+    description: "冰封实验室世界：研究 ×1.8，但低温使全局产量 ×0.9。",
+    modifiers: { researchMult: 1.8, globalProdMult: 0.9 },
+    unlock: { lifetimeCoreData: 80 },
+  },
+} as const;
+
+export type PlanetDefs = typeof PLANETS;
+
+// Upgradable regions. Bought with credits, capped at maxLevel, reset every run.
+// `planets` omitted = available on every planet.
+export const REGIONS = {
+  miningField: {
+    id: "miningField" as const,
+    name: "采矿场 / Mining Field",
+    icon: "⛏",
+    description: "扩建露天采场：采矿产量 +15%/级。",
+    baseCost: 200,
+    costGrowth: 1.35,
+    maxLevel: 20,
+    effects: [{ modKey: "miningMult" as const, perLevel: 0.15 }],
+  },
+  foundry: {
+    id: "foundry" as const,
+    name: "冶炼区 / Foundry",
+    icon: "🔥",
+    description: "增建冶炼车间：熔炼 +12%/级、钢材产出 +5%/级。",
+    baseCost: 400,
+    costGrowth: 1.4,
+    maxLevel: 20,
+    effects: [
+      { modKey: "smeltMult" as const, perLevel: 0.12 },
+      { modKey: "steelYieldMult" as const, perLevel: 0.05 },
+    ],
+  },
+  powerGrid: {
+    id: "powerGrid" as const,
+    name: "电网枢纽 / Power Grid",
+    icon: "🔌",
+    description: "加固输电网：供电 +10%/级。",
+    baseCost: 500,
+    costGrowth: 1.45,
+    maxLevel: 20,
+    effects: [{ modKey: "powerSupplyMult" as const, perLevel: 0.1 }],
+  },
+  researchPark: {
+    id: "researchPark" as const,
+    name: "科研园区 / Research Park",
+    icon: "🔬",
+    description: "集中研究设施：研究产量 +15%/级。",
+    planets: ["homeworld", "cryon"] as const,
+    baseCost: 800,
+    costGrowth: 1.5,
+    maxLevel: 20,
+    effects: [{ modKey: "researchMult" as const, perLevel: 0.15 }],
+  },
+  logisticsHub: {
+    id: "logisticsHub" as const,
+    name: "物流中枢 / Logistics Hub",
+    icon: "📦",
+    description: "优化物资调配：全局产量 +4%/级。",
+    planets: ["ferrum", "pyra"] as const,
+    baseCost: 900,
+    costGrowth: 1.5,
+    maxLevel: 20,
+    effects: [{ modKey: "globalProdMult" as const, perLevel: 0.04 }],
+  },
+} as const;
+
+export type RegionDefs = typeof REGIONS;
+
 // Permanent upgrades bought with Core Data after a prestige.
 export const UPGRADES = {
   fasterBoot: {

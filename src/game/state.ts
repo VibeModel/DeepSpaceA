@@ -2,6 +2,7 @@ import { SAVE_VERSION } from "./balance";
 import type { GameState } from "./types";
 import { applyTechUnlocks } from "./research";
 import { emptyAchievementMap } from "./achievements";
+import { emptyRegionMap } from "./planets";
 
 // A fresh, empty run (used at new game and after each prestige). Keeps only
 // the fields that should NOT be wiped by a prestige.
@@ -16,8 +17,12 @@ export function freshRunState(): Omit<
   | "stats"
   | "timestamp"
   | "lastTick"
+  // nextPlanet persists across prestiges, so it must NOT be reset here.
+  | "nextPlanet"
 > {
   return {
+    planet: "homeworld",
+    regions: emptyRegionMap(),
     resources: {
       ore: 0,
       steel: 0,
@@ -111,6 +116,7 @@ export function createNewGame(): GameState {
     coreData: 0,
     lifetimeCoreData: 0,
     prestigeGranted: 0,
+    nextPlanet: "homeworld",
     achievements: emptyAchievementMap(),
     permanentUpgrades: {
       fasterBoot: 0,

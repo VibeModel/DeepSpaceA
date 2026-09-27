@@ -66,6 +66,62 @@ export type AchievementId =
   | "highThroughput"
   | "timeTraveler";
 
+// Planets and their upgradable regions. A planet is chosen at prestige time and
+// applies a set of multipliers for the whole run; regions are per-run growth
+// bought with credits (a second progression axis beside buildings/techs).
+export type PlanetId = "homeworld" | "ferrum" | "pyra" | "cryon";
+
+export type RegionId =
+  | "miningField"
+  | "foundry"
+  | "powerGrid"
+  | "researchPark"
+  | "logisticsHub";
+
+// Multiplicative modifiers contributed by a planet and/or its regions. Missing
+// fields are treated as "no effect" (multiplier 1) when aggregated.
+export interface PlanetModifiers {
+  miningMult?: number;
+  smeltMult?: number;
+  factoryMult?: number;
+  researchMult?: number;
+  steelYieldMult?: number;
+  componentYieldMult?: number;
+  globalProdMult?: number;
+  powerSupplyMult?: number;
+  costMult?: number; // building cost multiplier
+  prestigeGainMult?: number;
+}
+
+export interface PlanetDefinition {
+  id: PlanetId;
+  name: string;
+  icon: string;
+  description: string;
+  modifiers: PlanetModifiers;
+  // Empty object = always unlocked. Otherwise every listed criterion must hold.
+  unlock: { prestigeCount?: number; lifetimeCoreData?: number };
+}
+
+export interface RegionEffect {
+  modKey: keyof PlanetModifiers;
+  // Multiplicative: level n contributes a (1 + perLevel * n) multiplier.
+  perLevel: number;
+}
+
+export interface RegionDefinition {
+  id: RegionId;
+  name: string;
+  icon: string;
+  description: string;
+  // Omitted = available on every planet. Otherwise restricted to the listed set.
+  planets?: readonly PlanetId[];
+  baseCost: number;
+  costGrowth: number;
+  maxLevel: number;
+  effects: readonly RegionEffect[];
+}
+
 export interface BuildingDefinition {
   id: BuildingId;
   name: string;
@@ -196,6 +252,13 @@ export interface GameState {
   // delta above this is granted, so prestiging repeatedly at the same lifetime
   // credits yields nothing (prevents farming Core Data).
   prestigeGranted: number;
+  // Planet the CURRENT run is played on. Reset to "homeworld" each prestige.
+  planet: PlanetId;
+  // Destination chosen for the NEXT prestige. Persists across prestiges so the
+  // selection survives the run reset.
+  nextPlanet: PlanetId;
+  // Region upgrade levels for the current planet. Reset each prestige.
+  regions: Record<RegionId, number>;
   // Unlocked achievements (pure trophies). Kept across prestiges.
   achievements: Record<AchievementId, boolean>;
   stats: GameStats;

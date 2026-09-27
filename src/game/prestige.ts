@@ -3,9 +3,10 @@ import {
   PRESTIGE_DIVISOR,
 } from "./balance";
 import { computeModifiers, applyTechUnlocks } from "./research";
-import type { GameState } from "./types";
+import type { GameState, PlanetId } from "./types";
 import { freshRunState } from "./state";
 import { capNumber } from "./num";
+import { planetUnlocked } from "./planets";
 
 // Raw core-data entitlement from lifetime credits, BEFORE the gain multiplier.
 // Lifetime credits are cumulative and never reset, so the entitlement only ever
@@ -31,8 +32,10 @@ export function canPrestige(state: GameState): boolean {
 }
 
 // Stellar Reboot: reset the current run but keep Core Data, permanent
-// upgrades and lifetime statistics.
-export function doPrestige(state: GameState): number {
+// upgrades and lifetime statistics. `targetPlanet` selects the destination for
+// the new run (must already be unlocked; otherwise the stored `nextPlanet` or
+// homeworld is used). Region levels are wiped along with the run.
+export function doPrestige(state: GameState, targetPlanet?: PlanetId): number {
   const gained = pendingCoreData(state);
   if (gained <= 0) return 0;
 
@@ -45,10 +48,11 @@ export function doPrestige(state: GameState): number {
   const permanentUpgrades = state.permanentUpgrades;
   const achievements = state.achievements;
   const stats = state.stats;
+  const nextPlanet = state.nextPlanet;
   // Claim the raw entitlement now; future prestiges only grant the delta above it.
   const claimed = rawEntitlement(state);
 
-  // Reset run-specific state.
+  // Reset run-specific state (planet back to homeworld, regions cleared).
   Object.assign(state, freshRunState());
 
   // Restore persistent fields.
@@ -57,7 +61,18 @@ export function doPrestige(state: GameState): number {
   state.permanentUpgrades = permanentUpgrades;
   state.achievements = achievements;
   state.stats = stats;
+  state.nextPlanet = nextPlanet;
   state.prestigeGranted = claimed;
+
+  // Land the new run on the chosen planet (falling back safely if it is not
+  // actually unlocked). The selection is applied exactly here — never mid-run —
+  // so the player cannot cherry-pick planet bonuses within a run.
+  const dest =
+    targetPlanet && planetUnlocked(state, targetPlanet)
+      ? targetPlanet
+      : state.nextPlanet;
+  state.planet = planetUnlocked(state, dest) ? dest : "homeworld";
+  state.nextPlanet = state.planet;
 
   // Prestige bookkeeping.
   state.stats.prestigeCount += 1;

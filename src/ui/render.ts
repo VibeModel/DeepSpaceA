@@ -22,6 +22,17 @@ import {
 import { MILESTONES } from "../game/balance";
 import { pendingCoreData, canPrestige } from "../game/prestige";
 import { PRESTIGE_THRESHOLD_CREDITS } from "../game/balance";
+import {
+  PLANET_LIST,
+  getPlanet,
+  getRegion,
+  regionsForPlanet,
+  regionLevel,
+  regionMaxed,
+  regionCost,
+  canUpgradeRegion,
+  planetUnlocked,
+} from "../game/planets";
 import type {
   GameState,
   BuildingId,
@@ -29,6 +40,9 @@ import type {
   UpgradeId,
   SellableResource,
   LiveRates,
+  PlanetId,
+  PlanetModifiers,
+  RegionId,
 } from "../game/types";
 import { formatNumber, formatRate, formatDuration, formatPercent } from "./format";
 import { getNumberFormat, getAnimationLevel, type NumberFormat, type AnimationLevel } from "./settings";
@@ -39,6 +53,7 @@ export type TabName =
   | "research"
   | "automation"
   | "prestige"
+  | "planets"
   | "stats"
   | "achievements"
   | "settings";
@@ -52,7 +67,9 @@ export interface Handlers {
   onToggleAutoSell(res: SellableResource): void;
   onToggleAutoBuy(id: BuildingId): void;
   onToggleAutoResearch(): void;
-  onPrestige(): void;
+  onPrestige(dest: PlanetId): void;
+  onSelectPlanet(id: PlanetId): void;
+  onUpgradeRegion(id: RegionId): void;
   onSetTab(tab: TabName): void;
   onSetNumberFormat(fmt: NumberFormat): void;
   onSetAnimation(level: AnimationLevel): void;
@@ -113,6 +130,32 @@ const powerRefs: {
   bar?: HTMLElement;
 } = {};
 
+// Region hotspots overlaid on the space scene. Rebuilt only when the planet
+// changes; their labels/classes are refreshed cheaply every tick.
+const REGION_POS: Record<RegionId, [number, number]> = {
+  miningField: [23, 70],
+  foundry: [38, 26],
+  powerGrid: [65, 30],
+  researchPark: [78, 66],
+  logisticsHub: [50, 86],
+};
+let hotspotRefs: { id: RegionId; el: HTMLButtonElement; label: HTMLElement }[] = [];
+let lastHotspotPlanet: PlanetId | null = null;
+
+// Chinese labels for the model modifier keys (used in planet cards).
+const MOD_LABELS: Record<keyof PlanetModifiers, string> = {
+  miningMult: "采矿",
+  smeltMult: "熔炼",
+  factoryMult: "制造",
+  researchMult: "研究",
+  steelYieldMult: "钢材产出",
+  componentYieldMult: "零件产出",
+  globalProdMult: "全局产量",
+  powerSupplyMult: "供电",
+  costMult: "建筑成本",
+  prestigeGainMult: "重构收益",
+};
+
 const TOPBAR = () => `
   <div class="topbar">
     <h1>深空自动化局<small>DEEP SPACE AUTOMATION</small></h1>
@@ -137,6 +180,7 @@ const debugBlock = import.meta.env.DEV
         <button data-debug="speed100">时间 ×100</button>
         <button data-debug="unlockBuildings">解锁所有建筑</button>
         <button data-debug="unlockPrestige">解锁 Prestige</button>
+        <button data-debug="unlockPlanets">解锁所有星球</button>
         <button class="danger" data-debug="wipe">清空存档</button>
       </div>
       <div class="hint">调试工具仅用于快速验证后期内容，生产构建默认隐藏（开发版可见）。</div>
@@ -227,9 +271,9 @@ function init(handlers: Handlers): void {
 
       <section class="panel" id="panel-production">
         <h2>PRODUCTION</h2>
-        <div class="space-scene" id="space-scene" data-strain="0" data-industry="0" data-ring="0" aria-hidden="true">
-          <div class="space-stars"></div>
-          <div class="planet-system">
+        <div class="space-scene" id="space-scene" data-strain="0" data-industry="0" data-ring="0">
+          <div class="space-stars" aria-hidden="true"></div>
+          <div class="planet-system" aria-hidden="true">
             <div class="planet-halo"></div>
             <div class="orbit orbit-inner"><span class="sat"></span></div>
             <div class="orbit orbit-outer"><span class="sat"></span></div>
@@ -241,6 +285,7 @@ function init(handlers: Handlers): void {
             </div>
             <div class="planet-ring"></div>
           </div>
+          <div class="region-hotspots" id="region-hotspots"></div>
         </div>
         <div id="resource-readouts"></div>
         <div class="power-row" id="power-row">
@@ -264,6 +309,7 @@ function init(handlers: Handlers): void {
       <button data-tab="research">🔬 科研 Research</button>
       <button data-tab="automation">🤖 自动化 Automation</button>
       <button data-tab="prestige">💠 重构 Prestige</button>
+      <button data-tab="planets">🪐 星球 Planets</button>
       <button data-tab="stats">📈 数据 Statistics</button>
       <button data-tab="achievements">🏆 成就 Achievements</button>
       <button data-tab="settings">⚙ 设置 Settings</button>
@@ -416,6 +462,21 @@ function init(handlers: Handlers): void {
   // freshly-replaced node. mousedown fires on press, before any re-render.
   app.addEventListener("mousedown", (e) => {
     const t = e.target as HTMLElement;
+    // Planet / region actions. `data-planet` is restricted to <button> for the
+    // same reason `data-anim` is (a bare attribute selector can match a wrapper
+    // element — or <html> — and swallow every later branch).
+    const rBtn = t.closest("[data-region]");
+    if (rBtn) {
+      H.onUpgradeRegion((rBtn as HTMLElement).dataset.region as RegionId);
+      tabDirty = true; // refresh the planets tab immediately
+      return;
+    }
+    const pBtn = t.closest("button[data-planet]");
+    if (pBtn) {
+      H.onSelectPlanet((pBtn as HTMLElement).dataset.planet as PlanetId);
+      tabDirty = true;
+      return;
+    }
     const sell = t.closest("[data-sell]");
     if (sell) {
       H.onSell((sell as HTMLElement).dataset.sell as SellableResource);
@@ -604,6 +665,9 @@ function updateLive(): void {
 
   // Power grid readout.
   updatePowerRow(r);
+
+  // Planet-scene region hotspots (labels + affordability).
+  updateHotspots();
 
   // Live stats.
   const runMs = Date.now() - s.stats.currentRunStart;
@@ -799,6 +863,49 @@ function updatePowerRow(r: LiveRates): void {
   }
 }
 
+// ---------- Region hotspots (planet scene overlay) ----------
+
+// Rebuild the hotspot buttons for the current planet's regions. Called only
+// when the planet actually changes.
+function rebuildHotspots(): void {
+  const wrap = document.getElementById("region-hotspots");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  hotspotRefs = [];
+  for (const def of regionsForPlanet(S.planet)) {
+    const btn = document.createElement("button");
+    btn.className = "region-hotspot";
+    btn.dataset.region = def.id;
+    const pos = REGION_POS[def.id] ?? [50, 50];
+    btn.style.left = `${pos[0]}%`;
+    btn.style.top = `${pos[1]}%`;
+    btn.title = `${def.name} — ${def.description}`;
+    btn.innerHTML = `<span class="rh-icon">${def.icon}</span><span class="rh-lv" data-rh-lv>Lv.0</span>`;
+    wrap.appendChild(btn);
+    hotspotRefs.push({
+      id: def.id,
+      el: btn,
+      label: btn.querySelector("[data-rh-lv]") as HTMLElement,
+    });
+  }
+  lastHotspotPlanet = S.planet;
+}
+
+// Cheap per-tick refresh of the hotspot labels/classes.
+function updateHotspots(): void {
+  if (!sceneRef) return;
+  if (S.planet !== lastHotspotPlanet) rebuildHotspots();
+  for (const h of hotspotRefs) {
+    const lv = regionLevel(S, h.id);
+    const maxed = regionMaxed(S, h.id);
+    const afford = canUpgradeRegion(S, h.id);
+    h.label.textContent = maxed ? `Lv.${lv} ✓` : `Lv.${lv}`;
+    h.el.classList.toggle("maxed", maxed);
+    h.el.classList.toggle("unaffordable", !maxed && !afford);
+    h.el.title = `${getRegion(h.id).name} · Lv.${lv}/${getRegion(h.id).maxLevel}`;
+  }
+}
+
 // ---------- Tab rendering ----------
 
 function renderTab(): void {
@@ -811,6 +918,7 @@ function renderTab(): void {
   if (currentTab === "research") el.innerHTML = renderResearch();
   else if (currentTab === "automation") el.innerHTML = renderAutomation();
   else if (currentTab === "prestige") el.innerHTML = renderPrestige();
+  else if (currentTab === "planets") el.innerHTML = renderPlanets();
   else if (currentTab === "achievements") el.innerHTML = renderAchievements();
   else if (currentTab === "settings") el.innerHTML = renderSettings();
   else el.innerHTML = renderStats();
@@ -928,7 +1036,9 @@ function renderPrestige(): string {
   const can = canPrestige(s);
   let html = `<h3 style="color:var(--accent)">星球重构 / Stellar Reboot</h3>`;
   html += `<p>累计赚取 Credits: <b>${formatNumber(s.stats.lifetimeCredits)}</b>（阈值 ${formatNumber(PRESTIGE_THRESHOLD_CREDITS)}）</p>`;
-  html += `<p>重构将重置：铁矿、钢材、零件、信用点、建筑、普通科技与研究。<br>保留：核心数据、永久升级、统计。</p>`;
+  html += `<p>重构将重置：铁矿、钢材、零件、信用点、建筑、普通科技、研究与区域等级。<br>保留：核心数据、永久升级、统计。</p>`;
+  const dest = getPlanet(s.nextPlanet);
+  html += `<p>下次重构目的地：<b style="color:var(--accent)">${dest.icon} ${dest.name}</b>（在「🪐 星球」页更改）</p>`;
   html += `<div class="modal" style="border:none;padding:0;max-width:none;background:none"><div class="body" style="margin:0">`;
   html += `<p>立即重构可获得：<b style="color:var(--accent-2);font-size:18px">${formatNumber(gain)} Core Data</b></p>`;
   const disabledLabel =
@@ -961,6 +1071,88 @@ function renderPrestige(): string {
   }
   html += `</div>`;
   return html;
+}
+
+function renderPlanets(): string {
+  const s = S;
+  const current = getPlanet(s.planet);
+  const dest = getPlanet(s.nextPlanet);
+  let html = `<h3 style="color:var(--accent)">🪐 星球 / Planets</h3>`;
+  html += `<p class="hint">切换星球的唯一方式是「重构」：选定目的地后，下次重构将在该星球重建整轮进度。区域等级每轮重置。</p>`;
+  html += `<p>当前星球：<b style="color:var(--accent)">${current.icon} ${current.name}</b> · 下次重构目的地：<b style="color:var(--accent-2)">${dest.icon} ${dest.name}</b></p>`;
+
+  // Planet cards.
+  html += `<div class="grid-cards">`;
+  for (const p of PLANET_LIST) {
+    const unlocked = planetUnlocked(s, p.id);
+    const selected = s.nextPlanet === p.id;
+    const isCurrent = s.planet === p.id;
+    const cls = "up-card" + (selected ? " selected" : "") + (unlocked ? "" : " locked");
+    let btn: string;
+    if (!unlocked) {
+      btn = `<button disabled>🔒 ${unlockText(p.id)}</button>`;
+    } else if (selected) {
+      btn = `<button disabled>✓ 已选为目的地</button>`;
+    } else {
+      btn = `<button class="primary" data-planet="${p.id}">设为目的地</button>`;
+    }
+    html += `<div class="${cls}">
+      <div class="uname">${p.icon} ${p.name}${isCurrent ? ` <span class="tlevel">当前</span>` : ""}</div>
+      <div class="udesc">${p.description}</div>
+      <div class="udesc">${planetModText(p.id)}</div>
+      ${btn}
+    </div>`;
+  }
+  html += `</div>`;
+
+  // Region upgrades for the current planet.
+  html += `<h3 style="color:var(--accent);margin-top:20px">区域升级 / Regions · ${current.icon} ${current.name}</h3>`;
+  html += `<p class="hint">用 Credits 升级本星球的区域，获得产量 / 电力 / 研究加成；等级每轮重置。</p>`;
+  html += `<p>可用 Credits：<b>${formatNumber(s.resources.credits)}</b></p>`;
+  html += `<div class="grid-cards">`;
+  for (const def of regionsForPlanet(s.planet)) {
+    const lv = regionLevel(s, def.id);
+    const maxed = regionMaxed(s, def.id);
+    const cost = regionCost(s, def.id);
+    const afford = canUpgradeRegion(s, def.id);
+    let btn: string;
+    if (maxed) {
+      btn = `<button disabled>✓ 已满级</button>`;
+    } else {
+      btn = `<button class="primary" data-region="${def.id}" ${afford ? "" : "disabled"}>升级到 Lv.${lv + 1} (${formatNumber(cost)} Credits)</button>`;
+    }
+    html += `<div class="up-card">
+      <div class="uname">${def.icon} ${def.name} <span class="tlevel">Lv.${lv}/${def.maxLevel}</span></div>
+      <div class="udesc">${def.description}</div>
+      <div class="bar"><span style="width:${Math.round((lv / def.maxLevel) * 100)}%"></span></div>
+      ${btn}
+    </div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+// Human-readable modifier summary for a planet card.
+function planetModText(id: PlanetId): string {
+  const modifiers = getPlanet(id).modifiers;
+  const parts: string[] = [];
+  for (const k of Object.keys(modifiers) as (keyof PlanetModifiers)[]) {
+    const v = modifiers[k];
+    if (typeof v !== "number" || v === 1) continue;
+    parts.push(`${MOD_LABELS[k]} ×${v}`);
+  }
+  return parts.length ? `修正：${parts.join(" · ")}` : "修正：无（均衡稳定）";
+}
+
+// Human-readable unlock criteria for a locked planet card.
+function unlockText(id: PlanetId): string {
+  const u = getPlanet(id).unlock;
+  const parts: string[] = [];
+  if (u.prestigeCount !== undefined) parts.push(`重构次数 ≥ ${u.prestigeCount}`);
+  if (u.lifetimeCoreData !== undefined) {
+    parts.push(`累计核心数据 ≥ ${formatNumber(u.lifetimeCoreData)}`);
+  }
+  return parts.length ? `解锁：${parts.join("，")}` : "";
 }
 
 function renderSettings(): string {
@@ -1136,9 +1328,13 @@ function openResetModal(): void {
 }
 
 function confirmPrestige(): void {
+  const dest = getPlanet(S.nextPlanet);
   openModal(`
     <h3 style="color:var(--accent-2)">确认星球重构</h3>
-    <div class="body">你将获得核心数据并重置当前轮进度。永久升级与统计保留。</div>
+    <div class="body">你将获得核心数据并重置当前轮进度，在新星球重建：<br>
+      <b style="color:var(--accent)">${dest.icon} ${dest.name}</b><br>
+      <span class="hint">目的地可在「🪐 星球」页更改。</span>
+    </div>
     <div class="actions">
       <button id="btn-modal-close">取消</button>
       <button class="primary" id="btn-prestige-confirm">确认重构</button>
@@ -1146,7 +1342,7 @@ function confirmPrestige(): void {
   // The modal lives under document.body, outside #app, so the delegated
   // #app handler never sees it — bind directly (same as reset/import).
   document.getElementById("btn-prestige-confirm")!.onclick = () => {
-    H.onPrestige();
+    H.onPrestige(S.nextPlanet);
     closeModal();
   };
 }
@@ -1233,6 +1429,18 @@ export function feedbackPurchase(id: BuildingId): void {
     ref.root.classList.remove("bought");
     ref.count.classList.remove("bump");
   }, 400);
+}
+
+// Visual feedback for a successful region upgrade: pop every visible control
+// bound to that region (hotspot over the scene + the card in the planets tab).
+export function feedbackRegion(id: RegionId): void {
+  document.querySelectorAll(`[data-region="${id}"]`).forEach((node) => {
+    const el = node as HTMLElement;
+    el.classList.remove("pop");
+    void el.offsetWidth; // restart animation
+    el.classList.add("pop");
+    setTimeout(() => el.classList.remove("pop"), 450);
+  });
 }
 
 // One-shot celebration on the planet scene (milestone reached / unlock).

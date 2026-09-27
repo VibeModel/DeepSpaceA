@@ -1,7 +1,9 @@
-import { SAVE_VERSION } from "./balance";
+import { SAVE_VERSION, PLANETS } from "./balance";
 import { createNewGame } from "./state";
 import { simulateOffline } from "./simulation";
-import type { GameState } from "./types";
+import { REGION_LIST, planetUnlocked } from "./planets";
+import { capNumber } from "./num";
+import type { GameState, PlanetId } from "./types";
 
 const STORAGE_KEY = "deepspace_automation_save";
 
@@ -51,6 +53,24 @@ function normalizeState(loaded: Partial<GameState>): GameState {
   };
   coerceLevels(out.techs as unknown as Record<string, unknown>);
   coerceLevels(out.permanentUpgrades as unknown as Record<string, unknown>);
+
+  // Planet / regions: validate ids and clamp region levels. `regions` already
+  // exists on the fresh default (enumerated by emptyRegionMap), so missing keys
+  // survive the merge above; here we guard against junk values.
+  const isPlanet = (v: unknown): v is PlanetId =>
+    typeof v === "string" && Object.prototype.hasOwnProperty.call(PLANETS, v);
+  if (!isPlanet(out.planet)) out.planet = "homeworld";
+  if (!isPlanet(out.nextPlanet)) out.nextPlanet = out.planet;
+  // A stored destination that is no longer unlocked falls back to the current
+  // planet rather than stranding the player on a locked world.
+  if (!planetUnlocked(out, out.nextPlanet)) out.nextPlanet = out.planet;
+  for (const def of REGION_LIST) {
+    const v = out.regions[def.id];
+    out.regions[def.id] = Math.min(
+      def.maxLevel,
+      Math.floor(capNumber(typeof v === "number" ? v : 0, def.maxLevel)),
+    );
+  }
 
   out.version = SAVE_VERSION;
   return out;

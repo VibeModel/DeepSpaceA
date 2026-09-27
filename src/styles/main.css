@@ -412,6 +412,14 @@ button.big {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px rgba(56, 225, 196, 0.35) inset;
 }
+/* Locked card (e.g. a planet that is not yet unlocked). */
+.up-card.locked {
+  opacity: 0.5;
+}
+/* Purchase / upgrade feedback pop reused by region cards. */
+.up-card.pop {
+  animation: cardPop 420ms ease-out;
+}
 
 .toggle-row {
   display: flex;

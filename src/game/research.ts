@@ -5,6 +5,7 @@ import {
   MAX_TECH_LEVEL,
 } from "./balance";
 import { capNumber, safePow } from "./num";
+import { planetRegionModifiers } from "./planets";
 import type {
   GameState,
   TechId,
@@ -28,6 +29,7 @@ export interface TechModifiers {
   componentYieldMult: number;
   globalProdMult: number;
   costGrowthReduction: number;
+  costMult: number;
   labUpkeepReduction: number;
   powerSupplyMult: number;
   unlockAutoSell: boolean;
@@ -60,6 +62,7 @@ export function computeModifiers(state: GameState): TechModifiers {
     componentYieldMult: 1,
     globalProdMult: 1,
     costGrowthReduction: 0,
+    costMult: 1,
     labUpkeepReduction: 0,
     powerSupplyMult: 1,
     unlockAutoSell: false,
@@ -102,6 +105,20 @@ export function computeModifiers(state: GameState): TechModifiers {
   m.globalProdMult *= pu("industrialMemory");
   m.researchMult *= pu("researchArchive");
   if (p.automatedLogistics) m.unlockAutoSell = true;
+
+  // Planets + regions: the final multiplicative layer. Folding these in here
+  // means simulate / power / prestige all benefit with zero extra wiring.
+  const pr = planetRegionModifiers(state);
+  m.miningMult *= pr.miningMult;
+  m.smeltMult *= pr.smeltMult;
+  m.factoryMult *= pr.factoryMult;
+  m.researchMult *= pr.researchMult;
+  m.steelYieldMult *= pr.steelYieldMult;
+  m.componentYieldMult *= pr.componentYieldMult;
+  m.globalProdMult *= pr.globalProdMult;
+  m.powerSupplyMult *= pr.powerSupplyMult;
+  m.costMult *= pr.costMult;
+  m.prestigeGainMult *= pr.prestigeGainMult;
 
   return m;
 }

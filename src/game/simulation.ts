@@ -8,9 +8,11 @@ import {
   MAX_OFFLINE_MS,
   MAX_BUILDINGS,
   MAX_TECH_LEVEL,
+  PLANETS,
 } from "./balance";
 import type { GameState, BuildingId, SellableResource, ResourceId, LiveRates } from "./types";
 import { milestoneMultiplier, buyBuilding, buildingCost } from "./buildings";
+import { REGION_LIST } from "./planets";
 import {
   computeModifiers,
   TECH_LIST,
@@ -314,6 +316,16 @@ function sanitize(state: GameState): void {
   state.coreData = capNumber(state.coreData);
   state.lifetimeCoreData = capNumber(state.lifetimeCoreData);
   state.prestigeGranted = capNumber(state.prestigeGranted);
+
+  // Planets + regions: keep ids legal and region levels within [0, maxLevel].
+  if (!(state.planet in PLANETS)) state.planet = "homeworld";
+  if (!(state.nextPlanet in PLANETS)) state.nextPlanet = state.planet;
+  for (const def of REGION_LIST) {
+    state.regions[def.id] = Math.min(
+      def.maxLevel,
+      Math.floor(capNumber(state.regions[def.id] ?? 0, def.maxLevel)),
+    );
+  }
 
   // Live rates are transient but must stay finite for the UI.
   const r = state.rates;

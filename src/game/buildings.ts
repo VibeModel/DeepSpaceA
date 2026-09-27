@@ -1,6 +1,7 @@
 import { BUILDINGS, MILESTONES, MILESTONE_BONUS, MAX_BUILDINGS } from "./balance";
 import type { BuildingId, BuildingDefinition, GameState } from "./types";
 import { capNumber, safePow } from "./num";
+import { costMultFromPlanet } from "./planets";
 
 export const BUILDING_LIST: BuildingDefinition[] = Object.values(BUILDINGS);
 
@@ -19,7 +20,8 @@ export function buildingCost(
   // Smart Logistics reduces cost growth.
   let growth = def.costGrowth;
   if (state.techs.smartLogistics) growth -= 0.05;
-  return capNumber(def.baseCost * safePow(growth, owned));
+  // Planet modifiers can raise/lower the base cost (e.g. Pyra ×1.15).
+  return capNumber(def.baseCost * safePow(growth, owned) * costMultFromPlanet(state));
 }
 
 // How many milestone bonus tiers a building currently has.
