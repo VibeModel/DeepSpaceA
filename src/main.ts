@@ -17,10 +17,10 @@ import {
   buyBuilding,
   buildingUnlocked,
 } from "./game/buildings";
-import { researchTech, applyTechUnlocks } from "./game/research";
-import { buyUpgrade } from "./game/upgrades";
+import { researchTech, applyTechUnlocks, techLevel } from "./game/research";
+import { buyUpgrade, upgradeLevel } from "./game/upgrades";
 import { doPrestige } from "./game/prestige";
-import { MILESTONES, AUTOSAVE_MS, MANUAL_MINE_AMOUNT } from "./game/balance";
+import { MILESTONES, AUTOSAVE_MS, MANUAL_MINE_AMOUNT, TECHS, UPGRADES } from "./game/balance";
 import type { GameState, BuildingId, SellableResource, TechId, UpgradeId } from "./game/types";
 import * as render from "./ui/render";
 
@@ -117,17 +117,24 @@ const handlers: render.Handlers = {
   onBuyTech(id: TechId) {
     if (researchTech(state, id)) {
       saveGame(state);
-      render.toast("RESEARCH COMPLETE", `${id} 已研究`, "info");
+      const lv = techLevel(state, id);
+      render.toast("RESEARCH", `${TECHS[id].name} Lv.${lv}`, "info");
     }
   },
   onBuyUpgrade(id: UpgradeId) {
-    if (buyUpgrade(state, id)) saveGame(state);
+    if (buyUpgrade(state, id)) {
+      saveGame(state);
+      render.toast("UPGRADE", `${UPGRADES[id].name} Lv.${upgradeLevel(state, id)}`, "info");
+    }
   },
   onToggleAutoSell(res: SellableResource) {
     state.autoSell[res] = !state.autoSell[res];
   },
   onToggleAutoBuy(id: BuildingId) {
     state.autoBuy[id] = !state.autoBuy[id];
+  },
+  onToggleAutoResearch() {
+    state.autoResearch = !state.autoResearch;
   },
   onPrestige() {
     const gained = doPrestige(state);

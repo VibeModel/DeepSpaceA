@@ -29,7 +29,8 @@ export type TechId =
   | "productionAnalytics"
   | "efficientLabs"
   | "quantumComputing"
-  | "coreSynthesis";
+  | "coreSynthesis"
+  | "automatedResearch";
 
 export type UpgradeId =
   | "fasterBoot"
@@ -62,8 +63,13 @@ export interface TechDefinition {
   branch: "Industrial Engineering" | "Automation" | "Computing";
   icon: string;
   description: string;
-  cost: number; // research points
+  cost: number; // research points (cost of the first level)
   requires: readonly TechId[];
+  // Repeatable numeric techs: after unlocking, can be upgraded indefinitely.
+  infinite?: boolean;
+  // Multiplier gained per level, e.g. 0.5 means +50% per level. Level n grants
+  // a (1 + effectPerLevel * n) multiplier.
+  effectPerLevel?: number;
 }
 
 export interface UpgradeDefinition {
@@ -71,7 +77,11 @@ export interface UpgradeDefinition {
   name: string;
   icon: string;
   description: string;
-  cost: number; // core data
+  cost: number; // core data (cost of the first level)
+  // Repeatable permanent upgrades: after the first purchase they can be
+  // upgraded indefinitely with escalating Core Data cost.
+  infinite?: boolean;
+  effectPerLevel?: number;
 }
 
 export interface LiveRates {
@@ -121,10 +131,15 @@ export interface GameState {
     research: number;
   };
   buildings: Record<BuildingId, number>;
-  techs: Record<TechId, boolean>;
+  // Tech level per tech: 0 = not researched, 1 = unlocked, >1 = upgraded
+  // (only repeatable/infinite techs can exceed 1).
+  techs: Record<TechId, number>;
   autoSell: Record<SellableResource, boolean>;
   autoBuy: Record<BuildingId, boolean>;
-  permanentUpgrades: Record<UpgradeId, boolean>;
+  autoResearch: boolean;
+  // Permanent upgrade level: 0 = not owned, 1 = owned, >1 = upgraded (only
+  // repeatable permanent upgrades can exceed 1).
+  permanentUpgrades: Record<UpgradeId, number>;
   coreData: number; // spendable prestige currency
   lifetimeCoreData: number;
   stats: GameStats;
@@ -132,6 +147,7 @@ export interface GameState {
     autoSellUnlocked: boolean;
     autoBuyUnlocked: boolean;
     analyticsUnlocked: boolean;
+    autoResearchUnlocked: boolean;
   };
   // Transient (recomputed each tick, persisted harmlessly).
   rates: LiveRates;

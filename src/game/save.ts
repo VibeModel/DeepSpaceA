@@ -40,6 +40,18 @@ function normalizeState(loaded: Partial<GameState>): GameState {
     }
   };
   mergeObj(out as unknown as Record<string, unknown>, loaded as Record<string, unknown>);
+
+  // Backwards compatibility: techs and permanent upgrades used to be stored as
+  // booleans. Coerce any legacy/partial values into numeric levels.
+  const coerceLevels = (obj: Record<string, unknown>) => {
+    for (const key of Object.keys(obj)) {
+      const v = obj[key];
+      obj[key] = typeof v === "number" ? v : v ? 1 : 0;
+    }
+  };
+  coerceLevels(out.techs as unknown as Record<string, unknown>);
+  coerceLevels(out.permanentUpgrades as unknown as Record<string, unknown>);
+
   out.version = SAVE_VERSION;
   return out;
 }

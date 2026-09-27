@@ -29,21 +29,22 @@ export function freshRunState(): Omit<
       laboratory: 0,
     },
     techs: {
-      highPressureDrill: false,
-      advancedAlloys: false,
-      precisionMfg: false,
-      massProduction: false,
-      overclockedDrills: false,
-      automatedSmelting: false,
-      automatedAssembly: false,
-      automatedTrading: false,
-      autoBuyLogic: false,
-      smartLogistics: false,
-      researchMethodology: false,
-      productionAnalytics: false,
-      efficientLabs: false,
-      quantumComputing: false,
-      coreSynthesis: false,
+      highPressureDrill: 0,
+      advancedAlloys: 0,
+      precisionMfg: 0,
+      massProduction: 0,
+      overclockedDrills: 0,
+      automatedSmelting: 0,
+      automatedAssembly: 0,
+      automatedTrading: 0,
+      autoBuyLogic: 0,
+      smartLogistics: 0,
+      researchMethodology: 0,
+      productionAnalytics: 0,
+      efficientLabs: 0,
+      quantumComputing: 0,
+      coreSynthesis: 0,
+      automatedResearch: 0,
     },
     autoSell: {
       ore: false,
@@ -56,10 +57,12 @@ export function freshRunState(): Omit<
       factory: false,
       laboratory: false,
     },
+    autoResearch: false,
     flags: {
       autoSellUnlocked: false,
       autoBuyUnlocked: false,
       analyticsUnlocked: false,
+      autoResearchUnlocked: false,
     },
     rates: {
       ore: 0,
@@ -93,10 +96,10 @@ export function createNewGame(): GameState {
     coreData: 0,
     lifetimeCoreData: 0,
     permanentUpgrades: {
-      fasterBoot: false,
-      industrialMemory: false,
-      automatedLogistics: false,
-      researchArchive: false,
+      fasterBoot: 0,
+      industrialMemory: 0,
+      automatedLogistics: 0,
+      researchArchive: 0,
     },
     stats: {
       currentRunStart: now,
@@ -112,9 +115,10 @@ export function createNewGame(): GameState {
     ...freshRunState(),
   };
 
-  // Faster Boot: start each run with 2 mining drones.
-  if (state.permanentUpgrades.fasterBoot) {
-    state.buildings.miningDrone = 2;
+  // Faster Boot: start each run with 2 mining drones per level.
+  const fb = state.permanentUpgrades.fasterBoot || 0;
+  if (fb > 0) {
+    state.buildings.miningDrone = 2 * fb;
   }
 
   applyTechUnlocks(state);

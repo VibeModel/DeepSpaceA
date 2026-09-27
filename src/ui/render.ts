@@ -5,8 +5,20 @@ import {
   nextMilestone,
   buildingUnlocked,
 } from "../game/buildings";
-import { TECH_LIST } from "../game/research";
-import { UPGRADE_LIST } from "../game/upgrades";
+import {
+  TECH_LIST,
+  techCost,
+  techLevel,
+  techMaxed,
+  isInfiniteTech,
+} from "../game/research";
+import {
+  UPGRADE_LIST,
+  upgradeCost,
+  upgradeLevel,
+  upgradeMaxed,
+  isInfiniteUpgrade,
+} from "../game/upgrades";
 import { MILESTONES } from "../game/balance";
 import { pendingCoreData, canPrestige } from "../game/prestige";
 import { PRESTIGE_THRESHOLD_CREDITS } from "../game/balance";
@@ -29,6 +41,7 @@ export interface Handlers {
   onBuyUpgrade(id: UpgradeId): void;
   onToggleAutoSell(res: SellableResource): void;
   onToggleAutoBuy(id: BuildingId): void;
+  onToggleAutoResearch(): void;
   onPrestige(): void;
   onSetTab(tab: TabName): void;
   onExport(): string;
@@ -333,6 +346,11 @@ function init(handlers: Handlers): void {
       H.onToggleAutoBuy((abBtn as HTMLElement).dataset.autobuy as BuildingId);
       return;
     }
+    const arBtn = t.closest("[data-autoresearch]");
+    if (arBtn) {
+      H.onToggleAutoResearch();
+      return;
+    }
     const dbg = t.closest("[data-debug]");
     if (dbg) {
       H.onDebug((dbg as HTMLElement).dataset.debug!);
@@ -501,19 +519,26 @@ function renderResearch(): string {
   let html = `<p style="margin-top:0;color:var(--muted)">研究点 Research: <b style="color:var(--accent)">${formatNumber(s.resources.research)}</b></p>`;
   html += `<div class="grid-cards">`;
   for (const t of TECH_LIST) {
-    const owned = s.techs[t.id];
-    const prereq = t.requires.every((r) => s.techs[r]);
-    const affordable = s.resources.research >= t.cost;
-    const locked = !owned && !prereq;
-    const cls = "tech-card" + (locked ? " locked" : "");
+    const level = techLevel(s, t.id);
+    const infinite = isInfiniteTech(t.id);
+    const maxed = techMaxed(s, t.id);
+    const prereq = t.requires.every((r) => s.techs[r] > 0);
+    const cost = techCost(s, t.id);
+    const affordable = s.resources.research >= cost;
+    const locked = level === 0 && !prereq;
+    const cls = "tech-card" + (locked ? " locked" : "") + (infinite ? " repeatable" : "");
+    const levelBadge = infinite && level > 0 ? `<span class="tlevel">Lv.${level}</span>` : "";
     let btn = "";
-    if (owned) btn = `<button disabled>✓ 已研究</button>`;
+    if (maxed) btn = `<button disabled>✓ 已研究</button>`;
     else if (locked) btn = `<button disabled>🔒 前置未解锁</button>`;
-    else btn = `<button class="primary" data-tech="${t.id}" ${affordable ? "" : "disabled"}>研究 (${formatNumber(t.cost)} RP)</button>`;
+    else {
+      const label = infinite && level > 0 ? `升级到 Lv.${level + 1}` : "研究";
+      btn = `<button class="primary" data-tech="${t.id}" ${affordable ? "" : "disabled"}>${label} (${formatNumber(cost)} RP)</button>`;
+    }
     html += `
       <div class="${cls}">
         <div class="branch">${t.branch}</div>
-        <div class="tname">${t.icon} ${t.name}</div>
+        <div class="tname">${t.icon} ${t.name} ${levelBadge}</div>
         <div class="tdesc">${t.description}</div>
         ${btn}
       </div>`;
@@ -559,6 +584,18 @@ function renderAutomation(): string {
     }
     html += `</div>`;
   }
+  // Auto-research
+  html += `<h3 style="color:var(--accent);margin-top:18px">自动科研 Auto-Research</h3>`;
+  if (!s.flags.autoResearchUnlocked) {
+    html += `<p class="hint">🔒 需要科技「自动科研 Automated Research」。</p>`;
+  } else {
+    const on = s.autoResearch;
+    html += `<div class="up-card">
+      <div class="uname">🤖 自动购买科技</div>
+      <div class="udesc">自动购买可负担的科技：优先"解锁型"，其次最便宜的"无限升级"。</div>
+      <button class="toggle ${on ? "on" : ""}" data-autoresearch>${on ? "✓ 已开启" : "关闭"}</button>
+    </div>`;
+  }
   return html;
 }
 
@@ -578,13 +615,20 @@ function renderPrestige(): string {
   html += `<p class="hint">使用 Core Data 购买，跨轮保留。</p>`;
   html += `<div class="grid-cards">`;
   for (const u of UPGRADE_LIST) {
-    const owned = s.permanentUpgrades[u.id];
-    const affordable = s.coreData >= u.cost;
+    const level = upgradeLevel(s, u.id);
+    const infinite = isInfiniteUpgrade(u.id);
+    const maxed = upgradeMaxed(s, u.id);
+    const cost = upgradeCost(s, u.id);
+    const affordable = s.coreData >= cost;
+    const levelBadge = infinite && level > 0 ? `<span class="tlevel">Lv.${level}</span>` : "";
     let btn = "";
-    if (owned) btn = `<button disabled>✓ 已拥有</button>`;
-    else btn = `<button class="primary" data-up="${u.id}" ${affordable ? "" : "disabled"}>购买 (${formatNumber(u.cost)} CD)</button>`;
+    if (maxed) btn = `<button disabled>✓ 已拥有</button>`;
+    else {
+      const label = infinite && level > 0 ? `升级到 Lv.${level + 1}` : "购买";
+      btn = `<button class="primary" data-up="${u.id}" ${affordable ? "" : "disabled"}>${label} (${formatNumber(cost)} CD)</button>`;
+    }
     html += `<div class="up-card">
-      <div class="uname">${u.icon} ${u.name}</div>
+      <div class="uname">${u.icon} ${u.name} ${levelBadge}</div>
       <div class="udesc">${u.description}</div>
       ${btn}
     </div>`;

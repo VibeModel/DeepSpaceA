@@ -383,6 +383,22 @@ button.big {
   font-weight: 600;
   margin: 2px 0;
 }
+/* Level badge for repeatable techs. */
+.tech-card .tlevel {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(56, 225, 196, 0.12);
+  border: 1px solid rgba(56, 225, 196, 0.4);
+  border-radius: 999px;
+}
+/* Repeatable techs get a subtle accent border so they stand out. */
+.tech-card.repeatable {
+  border-color: rgba(56, 225, 196, 0.35);
+}
 .tech-card .tdesc,
 .up-card .udesc {
   font-size: 11px;

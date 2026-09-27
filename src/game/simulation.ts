@@ -1,7 +1,26 @@
-import { BUILDINGS, SELL_PRICES, AUTOSELL_RESERVE, MANUAL_MINE_AMOUNT, AUTOBUY_TRIGGER_MULTIPLE, AUTOBUY_MAX_PER_TICK, MAX_OFFLINE_MS } from "./balance";
+import {
+  BUILDINGS,
+  SELL_PRICES,
+  AUTOSELL_RESERVE,
+  MANUAL_MINE_AMOUNT,
+  AUTOBUY_TRIGGER_MULTIPLE,
+  AUTOBUY_MAX_PER_TICK,
+  MAX_OFFLINE_MS,
+  MAX_BUILDINGS,
+  MAX_TECH_LEVEL,
+} from "./balance";
 import type { GameState, BuildingId, SellableResource, ResourceId, LiveRates } from "./types";
 import { milestoneMultiplier, buyBuilding, buildingCost } from "./buildings";
-import { computeModifiers } from "./research";
+import {
+  computeModifiers,
+  TECH_LIST,
+  canResearch,
+  isInfiniteTech,
+  techCost,
+  researchTech,
+} from "./research";
+import { capNumber } from "./num";
+import type { TechId } from "./types";
 
 // Cap a single simulation step so a long background stall cannot destabilise
 // the inventory math. Larger gaps are handled by the offline routine instead.
@@ -169,10 +188,43 @@ export function simulate(state: GameState, dtMs: number): void {
     state.stats.bestCreditsPerSec = r.credits;
   }
 
+  // 9b. Auto-research (if unlocked & enabled) spends research on techs.
+  autoResearchTick(state);
+
   // 10. Sanitise to avoid NaN / negative / Infinity polluting the save.
   sanitize(state);
 
   state.rates = r;
+}
+
+// Max tech purchases per tick to avoid unbounded loops in a single frame.
+const AUTORESEARCH_MAX_PER_TICK = 5;
+
+// Spend spare research automatically. Priority: one-time "unlock" techs first
+// (cheapest first), then the cheapest affordable repeatable upgrade.
+function autoResearchTick(state: GameState): void {
+  if (!state.flags.autoResearchUnlocked || !state.autoResearch) return;
+  for (let i = 0; i < AUTORESEARCH_MAX_PER_TICK; i++) {
+    let best: TechId | null = null;
+    let bestCost = Infinity;
+    let bestInfinite = true;
+    for (const t of TECH_LIST) {
+      if (!canResearch(state, t.id)) continue;
+      const infinite = isInfiniteTech(t.id);
+      const cost = techCost(state, t.id);
+      const better =
+        best === null ||
+        (bestInfinite && !infinite) ||
+        (bestInfinite === infinite && cost < bestCost);
+      if (better) {
+        best = t.id;
+        bestCost = cost;
+        bestInfinite = infinite;
+      }
+    }
+    if (best === null) break;
+    if (!researchTech(state, best)) break;
+  }
 }
 
 // Manual mining click.
@@ -195,13 +247,49 @@ export function sellResource(state: GameState, rid: SellableResource, fraction: 
 }
 
 function sanitize(state: GameState): void {
+  // Resources: clamp to [0, MAX_VALUE]. Overflow caps (never zeroes out).
   const ids: ResourceId[] = ["ore", "steel", "components", "credits", "research"];
-  for (const id of ids) {
-    const v = state.resources[id];
-    if (!Number.isFinite(v) || v < 0) {
-      state.resources[id] = Math.max(0, Number.isFinite(v) ? v : 0);
+  for (const id of ids) state.resources[id] = capNumber(state.resources[id]);
+
+  // Buildings: non-negative integers capped at MAX_BUILDINGS.
+  for (const id of BUILDING_ORDER) {
+    state.buildings[id] = Math.min(
+      MAX_BUILDINGS,
+      Math.floor(capNumber(state.buildings[id], MAX_BUILDINGS)),
+    );
+  }
+
+  // Tech levels: non-negative integers capped at MAX_TECH_LEVEL.
+  const techs = state.techs as unknown as Record<string, number>;
+  for (const key of Object.keys(techs)) {
+    techs[key] = Math.min(
+      MAX_TECH_LEVEL,
+      Math.floor(capNumber(techs[key], MAX_TECH_LEVEL)),
+    );
+  }
+
+  // Prestige currency.
+  state.coreData = capNumber(state.coreData);
+  state.lifetimeCoreData = capNumber(state.lifetimeCoreData);
+
+  // Live rates are transient but must stay finite for the UI.
+  const r = state.rates;
+  for (const key of Object.keys(r) as (keyof LiveRates)[]) {
+    if (typeof r[key] === "number") {
+      (r[key] as number) = capNumber(r[key] as number);
     }
   }
+
+  // Statistics.
+  const st = state.stats;
+  st.lifetimeCredits = capNumber(st.lifetimeCredits);
+  st.lifetimePlayTime = capNumber(st.lifetimePlayTime);
+  st.totalOre = capNumber(st.totalOre);
+  st.totalSteel = capNumber(st.totalSteel);
+  st.totalComponents = capNumber(st.totalComponents);
+  st.buildingsPurchased = capNumber(st.buildingsPurchased);
+  st.prestigeCount = capNumber(st.prestigeCount);
+  st.bestCreditsPerSec = capNumber(st.bestCreditsPerSec);
 }
 
 // Run a coarse simulation for offline progress, capped at MAX_OFFLINE_MS.

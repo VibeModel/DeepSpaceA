@@ -1,5 +1,6 @@
-import { BUILDINGS, MILESTONES, MILESTONE_BONUS } from "./balance";
+import { BUILDINGS, MILESTONES, MILESTONE_BONUS, MAX_BUILDINGS } from "./balance";
 import type { BuildingId, BuildingDefinition, GameState } from "./types";
+import { capNumber, safePow } from "./num";
 
 export const BUILDING_LIST: BuildingDefinition[] = Object.values(BUILDINGS);
 
@@ -15,11 +16,10 @@ export function buildingCost(
 ): number {
   const def = BUILDINGS[id];
   const owned = ownedOverride ?? state.buildings[id];
-  // Smart Logistics permanent/tech reduces cost growth.
+  // Smart Logistics reduces cost growth.
   let growth = def.costGrowth;
   if (state.techs.smartLogistics) growth -= 0.05;
-  if (state.permanentUpgrades.industrialMemory) growth -= 0.0; // memory is production, not cost
-  return def.baseCost * Math.pow(growth, owned);
+  return capNumber(def.baseCost * safePow(growth, owned));
 }
 
 // How many milestone bonus tiers a building currently has.
@@ -69,6 +69,7 @@ export function buildingUnlocked(state: GameState, id: BuildingId): boolean {
 
 // Attempt to buy one unit of a building. Returns true on success.
 export function buyBuilding(state: GameState, id: BuildingId): boolean {
+  if (state.buildings[id] >= MAX_BUILDINGS) return false;
   const cost = buildingCost(state, id);
   if (state.resources.credits < cost) return false;
   state.resources.credits -= cost;

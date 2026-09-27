@@ -5,6 +5,7 @@ import {
 import { computeModifiers, applyTechUnlocks } from "./research";
 import type { GameState } from "./types";
 import { freshRunState } from "./state";
+import { capNumber } from "./num";
 
 // Core Data the player would gain if they prestiged right now.
 export function pendingCoreData(state: GameState): number {
@@ -12,7 +13,7 @@ export function pendingCoreData(state: GameState): number {
   const raw = Math.floor(
     Math.sqrt(state.stats.lifetimeCredits / PRESTIGE_DIVISOR),
   );
-  return Math.max(0, Math.floor(raw * mods.prestigeGainMult));
+  return capNumber(Math.floor(raw * mods.prestigeGainMult));
 }
 
 export function canPrestige(state: GameState): boolean {
@@ -51,8 +52,9 @@ export function doPrestige(state: GameState): number {
   state.stats.currentRunStart = Date.now();
 
   // Re-apply run-start permanent bonuses (e.g. Faster Boot).
-  if (state.permanentUpgrades.fasterBoot) {
-    state.buildings.miningDrone = 2;
+  const fb = state.permanentUpgrades.fasterBoot || 0;
+  if (fb > 0) {
+    state.buildings.miningDrone = 2 * fb;
   }
   // Techs were wiped by the reset, so recompute unlock flags from any
   // permanent upgrades that grant them (e.g. Automated Logistics).

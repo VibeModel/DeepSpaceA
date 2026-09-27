@@ -4,6 +4,15 @@
 
 export const SAVE_VERSION = 1;
 
+// Global upper bound for any game value. Keeps numbers finite even under
+// unbounded exponential growth (avoids Infinity/NaN corrupting state).
+export const MAX_VALUE = 1e18;
+// Hard caps that stop exponential blow-ups at the source.
+export const MAX_TECH_LEVEL = 1000;
+export const MAX_BUILDINGS = 1_000_000;
+// Core Data cost growth per level for repeatable permanent upgrades.
+export const UPGRADE_COST_GROWTH = 1.6;
+
 // Maximum simulated offline time (ms). Prevents absurd catch-up.
 export const MAX_OFFLINE_MS = 24 * 60 * 60 * 1000;
 
@@ -104,9 +113,16 @@ export const AUTOBUY_TRIGGER_MULTIPLE = 1.5;
 // Cap purchases per tick for a single building when auto-buying.
 export const AUTOBUY_MAX_PER_TICK = 5;
 
+// Cost growth per level for repeatable "infinite" techs. Buying the (n+1)-th
+// level costs baseCost * INFINITE_TECH_COST_GROWTH^n. Linear effect growth
+// against exponential cost gives natural diminishing returns.
+export const INFINITE_TECH_COST_GROWTH = 1.5;
+
 // Tech tree. 15 techs across 3 branches. Each branch is linear (requires the
 // previous tech in the same branch). Mix of numeric, mechanic, automation and
 // quality-of-life effects.
+// Nine "pure production multiplier" techs are repeatable (infinite): after the
+// first purchase (level 1) they can be upgraded further for escalating cost.
 export const TECHS = {
   // Industrial Engineering — raw production boosts.
   highPressureDrill: {
@@ -114,45 +130,55 @@ export const TECHS = {
     name: "高压钻头 / High Pressure Drill",
     branch: "Industrial Engineering" as const,
     icon: "⬆",
-    description: "采矿产量 +50%。",
+    description: "采矿产量 +50%（每级再 +50%）。",
     cost: 10,
     requires: [],
+    infinite: true,
+    effectPerLevel: 0.5,
   },
   advancedAlloys: {
     id: "advancedAlloys" as const,
     name: "高级合金 / Advanced Alloys",
     branch: "Industrial Engineering" as const,
     icon: "🧪",
-    description: "钢材产出率 +25%。",
+    description: "钢材产出率 +25%（每级再 +25%）。",
     cost: 25,
     requires: ["highPressureDrill"],
+    infinite: true,
+    effectPerLevel: 0.25,
   },
   precisionMfg: {
     id: "precisionMfg" as const,
     name: "精密制造 / Precision Mfg",
     branch: "Industrial Engineering" as const,
     icon: "🔧",
-    description: "零件产出率 +25%。",
+    description: "零件产出率 +25%（每级再 +25%）。",
     cost: 60,
     requires: ["advancedAlloys"],
+    infinite: true,
+    effectPerLevel: 0.25,
   },
   massProduction: {
     id: "massProduction" as const,
     name: "批量生产 / Mass Production",
     branch: "Industrial Engineering" as const,
     icon: "🏭",
-    description: "所有建筑产量 +25%。",
+    description: "所有建筑产量 +25%（每级再 +25%）。",
     cost: 140,
     requires: ["precisionMfg"],
+    infinite: true,
+    effectPerLevel: 0.25,
   },
   overclockedDrills: {
     id: "overclockedDrills" as const,
     name: "超频钻头 / Overclocked Drills",
     branch: "Industrial Engineering" as const,
     icon: "⚡",
-    description: "采矿产量 再 +50%。",
+    description: "采矿产量 +50%（每级再 +50%）。",
     cost: 320,
     requires: ["massProduction"],
+    infinite: true,
+    effectPerLevel: 0.5,
   },
   // Automation — speed + system unlocks.
   automatedSmelting: {
@@ -160,18 +186,22 @@ export const TECHS = {
     name: "自动熔炼 / Automated Smelting",
     branch: "Automation" as const,
     icon: "🔥",
-    description: "熔炼速度 +50%。",
+    description: "熔炼速度 +50%（每级再 +50%）。",
     cost: 15,
     requires: [],
+    infinite: true,
+    effectPerLevel: 0.5,
   },
   automatedAssembly: {
     id: "automatedAssembly" as const,
     name: "自动装配 / Automated Assembly",
     branch: "Automation" as const,
     icon: "⚙",
-    description: "制造速度 +50%。",
+    description: "制造速度 +50%（每级再 +50%）。",
     cost: 40,
     requires: ["automatedSmelting"],
+    infinite: true,
+    effectPerLevel: 0.5,
   },
   automatedTrading: {
     id: "automatedTrading" as const,
@@ -206,9 +236,11 @@ export const TECHS = {
     name: "研究方法 / Research Methodology",
     branch: "Computing" as const,
     icon: "📐",
-    description: "研究产量 +50%。",
+    description: "研究产量 +50%（每级再 +50%）。",
     cost: 20,
     requires: [],
+    infinite: true,
+    effectPerLevel: 0.5,
   },
   productionAnalytics: {
     id: "productionAnalytics" as const,
@@ -233,9 +265,11 @@ export const TECHS = {
     name: "量子计算 / Quantum Computing",
     branch: "Computing" as const,
     icon: "🌌",
-    description: "研究产量 再 +100%。",
+    description: "研究产量 +100%（每级再 +100%）。",
     cost: 250,
     requires: ["efficientLabs"],
+    infinite: true,
+    effectPerLevel: 1.0,
   },
   coreSynthesis: {
     id: "coreSynthesis" as const,
@@ -246,6 +280,15 @@ export const TECHS = {
     cost: 550,
     requires: ["quantumComputing"],
   },
+  automatedResearch: {
+    id: "automatedResearch" as const,
+    name: "自动科研 / Automated Research",
+    branch: "Computing" as const,
+    icon: "🤖",
+    description: "解锁自动科研：自动购买可负担的科技（优先解锁型，其次最便宜的无限升级）。",
+    cost: 300,
+    requires: ["quantumComputing"],
+  },
 } as const;
 
 // Permanent upgrades bought with Core Data after a prestige.
@@ -254,15 +297,19 @@ export const UPGRADES = {
     id: "fasterBoot" as const,
     name: "快速启动 / Faster Boot",
     icon: "🚀",
-    description: "每轮开局获得 2 台采矿无人机。",
+    description: "每轮开局获得 2 台采矿无人机（每级 +2）。",
     cost: 3,
+    infinite: true,
+    effectPerLevel: 2, // extra mining drones at run start per level
   },
   industrialMemory: {
     id: "industrialMemory" as const,
     name: "工业记忆 / Industrial Memory",
     icon: "🧠",
-    description: "所有生产效率 +20%。",
+    description: "所有生产效率 +20%（每级再 +20%）。",
     cost: 5,
+    infinite: true,
+    effectPerLevel: 0.2,
   },
   automatedLogistics: {
     id: "automatedLogistics" as const,
@@ -275,7 +322,9 @@ export const UPGRADES = {
     id: "researchArchive" as const,
     name: "研究档案 / Research Archive",
     icon: "🗄",
-    description: "研究产量 +25%。",
+    description: "研究产量 +25%（每级再 +25%）。",
     cost: 4,
+    infinite: true,
+    effectPerLevel: 0.25,
   },
 } as const;
