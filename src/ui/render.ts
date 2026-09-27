@@ -93,6 +93,42 @@ const debugBlock = import.meta.env.DEV
     </details>`
   : "";
 
+// Keyboard shortcuts:
+//   Q            = manual mine
+//   A S D F      = buy buildings in list order
+//   W E R        = sell ore / steel / components
+export const MINE_KEY = "Q";
+const BUILDING_KEYS: BuildingId[] = ["miningDrone", "furnace", "factory", "laboratory"];
+const BUY_KEY_CHARS = ["A", "S", "D", "F"];
+const SELL_KEYS: Record<SellableResource, string> = {
+  ore: "W",
+  steel: "E",
+  components: "R",
+};
+
+export const KEY_BINDINGS: Record<
+  string,
+  { type: "mine" } | { type: "buy"; id: BuildingId } | { type: "sell"; res: SellableResource }
+> = {
+  q: { type: "mine" },
+  a: { type: "buy", id: "miningDrone" },
+  s: { type: "buy", id: "furnace" },
+  d: { type: "buy", id: "factory" },
+  f: { type: "buy", id: "laboratory" },
+  w: { type: "sell", res: "ore" },
+  e: { type: "sell", res: "steel" },
+  r: { type: "sell", res: "components" },
+};
+
+export function keyForBuilding(id: BuildingId): string {
+  const i = BUILDING_KEYS.indexOf(id);
+  return i >= 0 ? BUY_KEY_CHARS[i] : "";
+}
+
+export function keyForSell(res: SellableResource): string {
+  return SELL_KEYS[res];
+}
+
 function buildingCardHTML(b: { id: BuildingId; icon: string; name: string; description: string }): string {
   return `
   <div class="building" data-bid="${b.id}">
@@ -107,7 +143,7 @@ function buildingCardHTML(b: { id: BuildingId; icon: string; name: string; descr
     </div>
     <div class="row">
       <span class="cost" data-ref="cost">—</span>
-      <button class="primary" data-ref="buy">购买</button>
+      <button class="primary" data-ref="buy">购买 <kbd>${keyForBuilding(b.id)}</kbd></button>
     </div>
     <div class="milestone" data-ref="milestone"></div>
   </div>`;
@@ -122,12 +158,12 @@ function init(handlers: Handlers): void {
       <section class="panel" id="panel-buildings">
         <h2>BUILDINGS</h2>
         <div class="manual">
-          <button class="big primary" id="btn-mine">⛏ 手动采矿 (+1 铁矿)</button>
+          <button class="big primary" id="btn-mine">⛏ 手动采矿 (+1 铁矿) <kbd>${MINE_KEY}</kbd></button>
         </div>
         <div class="manual">
-          <button data-sell="ore">出售 矿石</button>
-          <button data-sell="steel">出售 钢材</button>
-          <button data-sell="components">出售 零件</button>
+          <button data-sell="ore">出售 矿石 <kbd>${keyForSell("ore")}</kbd></button>
+          <button data-sell="steel">出售 钢材 <kbd>${keyForSell("steel")}</kbd></button>
+          <button data-sell="components">出售 零件 <kbd>${keyForSell("components")}</kbd></button>
         </div>
         <div id="buildings-list"></div>
       </section>
@@ -254,7 +290,10 @@ function init(handlers: Handlers): void {
     <div class="stat-line"><span class="k">Research /s</span><span class="v" id="ls-research">0</span></div>`;
 
   // Wire delegated events.
-  app.addEventListener("click", (e) => {
+  // Use "mousedown" (not "click") so that rapid re-renders of the tab panels
+  // (which rebuild innerHTML) cannot drop a click whose mouseup lands on a
+  // freshly-replaced node. mousedown fires on press, before any re-render.
+  app.addEventListener("mousedown", (e) => {
     const t = e.target as HTMLElement;
     const sell = t.closest("[data-sell]");
     if (sell) {

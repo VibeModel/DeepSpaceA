@@ -115,7 +115,10 @@ const handlers: render.Handlers = {
     buyBuilding(state, id);
   },
   onBuyTech(id: TechId) {
-    if (researchTech(state, id)) saveGame(state);
+    if (researchTech(state, id)) {
+      saveGame(state);
+      render.toast("RESEARCH COMPLETE", `${id} 已研究`, "info");
+    }
   },
   onBuyUpgrade(id: UpgradeId) {
     if (buyUpgrade(state, id)) saveGame(state);
@@ -227,3 +230,22 @@ const handlers: render.Handlers = {
 render.start(handlers);
 render.render(state);
 requestAnimationFrame(loop);
+
+// ---------- Keyboard shortcuts ----------
+// Q = mine, A/S/D/F = buy buildings, W/E/R = sell ore/steel/components.
+// Ignored while typing in inputs (e.g. the import textarea) or with modifiers.
+window.addEventListener("keydown", (e) => {
+  const tag = (e.target as HTMLElement | null)?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const bind = render.KEY_BINDINGS[e.key.toLowerCase()];
+  if (!bind) return;
+  e.preventDefault();
+  if (bind.type === "mine") {
+    handlers.onMine();
+  } else if (bind.type === "buy") {
+    if (buildingUnlocked(state, bind.id)) handlers.onBuyBuilding(bind.id);
+  } else {
+    handlers.onSell(bind.res);
+  }
+});

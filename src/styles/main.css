@@ -148,6 +148,22 @@ button.primary {
   color: #04130f;
   font-weight: 600;
 }
+/* Keyboard shortcut hint chip. */
+kbd {
+  display: inline-block;
+  min-width: 16px;
+  padding: 1px 5px;
+  margin-left: 4px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--accent);
+  background: rgba(56, 225, 196, 0.12);
+  border: 1px solid rgba(56, 225, 196, 0.4);
+  border-radius: 4px;
+}
 button.danger {
   border-color: var(--danger);
   color: var(--danger);
