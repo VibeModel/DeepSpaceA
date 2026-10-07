@@ -242,6 +242,50 @@
   50% { filter: brightness(1.2); }
 }
 
+/* ---------- Convoy lanes (ships orbiting, count follows total buildings) ----
+   Each ship is a zero-size pivot at the planet centre that rotates a full
+   turn; the inner span is offset by --convoy-r so it traces a circular lane.
+   --convoy-dur is written from visual.ts (faster when the base is busy).     */
+.convoy-layer {
+  position: absolute;
+  inset: 0;
+}
+.convoy {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  animation: convoyOrbit var(--convoy-dur, 20s) linear infinite;
+  animation-delay: var(--convoy-delay, 0s);
+  transition: opacity 500ms ease;
+}
+.convoy.on { opacity: 1; }
+.convoy .ship {
+  position: absolute;
+  top: -2px;
+  left: var(--convoy-r, 72px);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #9ff3e2;
+  box-shadow: 0 0 7px rgba(56, 225, 196, 0.9);
+}
+/* Motion trail, pointing back along the lane. */
+.convoy .ship::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  width: 15px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(159, 243, 226, 0.6));
+}
+@keyframes convoyOrbit {
+  to { transform: rotate(360deg); }
+}
+
 /* ---------- Bottleneck warning (amber) ---------- */
 .space-scene[data-strain="1"] .planet-halo {
   background: radial-gradient(circle, rgba(245, 166, 35, 0.3) 0%, transparent 66%);
@@ -311,6 +355,25 @@
   display: inline-block;
 }
 
+/* Working buildings breathe: the pulse speeds up with the owned count (same
+   curve as the colony towers). Drawn on a pseudo-element so it never clashes
+   with the purchase pop / unlock flash on the card itself. */
+.building {
+  position: relative;
+}
+.building[data-busy="1"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: busyGlow var(--pulse-dur, 2.6s) ease-in-out infinite;
+}
+@keyframes busyGlow {
+  0%, 100% { box-shadow: inset 0 0 0 rgba(56, 225, 196, 0); }
+  50% { box-shadow: inset 0 0 16px rgba(56, 225, 196, 0.16); }
+}
+
 /* New system unlocked: brief glow on the building card. */
 .building.unlocked {
   animation: unlockedPop 1.2s ease-out;
@@ -340,7 +403,11 @@
 :root[data-anim="off"] .resource-row .val,
 :root[data-anim="off"] .flow-stage::after,
 :root[data-anim="off"] .flow-arrow,
-:root[data-anim="off"] .topbar[data-active="1"] #r-credits {
+:root[data-anim="off"] .topbar[data-active="1"] #r-credits,
+:root[data-anim="off"] .cc-tower,
+:root[data-anim="off"] .cc-tower.on,
+:root[data-anim="off"] .colony-cluster,
+:root[data-anim="off"] .building[data-busy="1"]::after {
   animation: none !important;
   transition: none !important;
 }
@@ -353,6 +420,9 @@
 :root[data-anim="subtle"] .space-stars,
 :root[data-anim="subtle"] .planet-ring,
 :root[data-anim="subtle"] .planet-clouds,
+:root[data-anim="subtle"] .convoy,
+:root[data-anim="subtle"] .cc-tower.on,
+:root[data-anim="subtle"] .building[data-busy="1"]::after,
 :root[data-anim="subtle"] .flow-stage::after,
 :root[data-anim="subtle"] .flow-arrow,
 :root[data-anim="subtle"] .topbar[data-active="1"] #r-credits {
@@ -369,6 +439,10 @@
   .building.bought,
   .building .count.bump,
   .building.unlocked,
+  .building[data-busy="1"]::after,
+  .cc-tower,
+  .cc-tower.on,
+  .colony-cluster,
   .topbar[data-active="1"] #r-credits {
     animation: none !important;
     transition: none !important;

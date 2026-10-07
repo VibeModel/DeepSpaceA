@@ -19,6 +19,7 @@ import {
   simulate,
   manualMine,
   sellResource,
+  sellAllResources,
   simulateOffline,
 } from "../src/game/simulation";
 import { pendingCoreData, doPrestige, canPrestige } from "../src/game/prestige";
@@ -29,6 +30,8 @@ import {
   UPGRADES,
   INFINITE_TECH_COST_GROWTH,
   MAX_VALUE,
+  SELLABLE_RESOURCES,
+  SELL_PRICES,
 } from "../src/game/balance";
 import {
   isInfiniteUpgrade,
@@ -82,9 +85,9 @@ function near(a: number, b: number, eps = 1e-6): boolean {
 // 3. Tech modifiers.
 {
   const s = createNewGame();
-  ok(computeModifiers(s).miningMult === 1, "base miningMult 1");
+  ok(computeModifiers(s).producerMult.ore === 1, "base miningMult 1");
   s.techs.highPressureDrill = 1;
-  ok(computeModifiers(s).miningMult === 1.5, "highPressureDrill -> 1.5");
+  ok(computeModifiers(s).producerMult.ore === 1.5, "highPressureDrill -> 1.5");
 }
 
 // 3b. Repeatable ("infinite") techs: cost grows, effect scales with level.
@@ -98,7 +101,7 @@ function near(a: number, b: number, eps = 1e-6): boolean {
   s.resources.research = 1_000_000;
   ok(researchTech(s, "highPressureDrill"), "buy Lv1");
   ok(techLevel(s, "highPressureDrill") === 1, "level 1 after buy");
-  ok(near(computeModifiers(s).miningMult, 1.5), "Lv1 mining x1.5");
+  ok(near(computeModifiers(s).producerMult.ore, 1.5), "Lv1 mining x1.5");
   ok(
     near(techCost(s, "highPressureDrill"), base * INFINITE_TECH_COST_GROWTH),
     "Lv1->2 cost = base * growth",
@@ -106,7 +109,7 @@ function near(a: number, b: number, eps = 1e-6): boolean {
 
   ok(researchTech(s, "highPressureDrill"), "buy Lv2");
   ok(techLevel(s, "highPressureDrill") === 2, "level 2 after buy");
-  ok(near(computeModifiers(s).miningMult, 2.0), "Lv2 mining x2.0 (linear)");
+  ok(near(computeModifiers(s).producerMult.ore, 2.0), "Lv2 mining x2.0 (linear)");
   ok(!techMaxed(s, "highPressureDrill"), "repeatable tech never maxed");
 
   // Finite tech stays one-time (smartLogistics is NOT repeatable).
@@ -130,11 +133,13 @@ function near(a: number, b: number, eps = 1e-6): boolean {
   ok(s.resources.steel > beforeSteel, "steel produced");
   ok(s.resources.components > beforeComp, "components produced");
   ok(Number.isFinite(s.resources.ore) && s.resources.ore >= 0, "ore finite/nonneg");
-  ok(s.rates.furnaceUtil <= 1.0001, "furnace util <= 1");
-  ok(s.rates.furnaceCap > 0, "furnace capacity reported");
-  ok(s.rates.factoryCap > 0, "factory capacity reported");
+  const smeltSteel = s.rates.processors.smeltSteel;
+  const makeComponents = s.rates.processors.makeComponents;
+  ok(smeltSteel.util <= 1.0001, "furnace util <= 1");
+  ok(smeltSteel.cap > 0, "furnace capacity reported");
+  ok(makeComponents.cap > 0, "factory capacity reported");
   // furnace capacity (5/s) < mining (20/s) -> ore accumulates, furnace full.
-  ok(s.rates.oreAccumulating === true, "ore accumulating detected");
+  ok(smeltSteel.accumulating === true, "ore accumulating detected");
 }
 
 // 5. Bottleneck (shortage) when upstream too weak.
@@ -143,7 +148,7 @@ function near(a: number, b: number, eps = 1e-6): boolean {
   s.buildings.miningDrone = 1; // ~1 ore/s (no milestone)
   s.buildings.furnace = 20; // 20 ore/s capacity >> supply
   simulate(s, 1_000);
-  ok(s.rates.oreShortage === true, "ore shortage detected");
+  ok(s.rates.processors.smeltSteel.shortage === true, "ore shortage detected");
 }
 
 // 6. Manual mine + sell.
@@ -158,6 +163,80 @@ function near(a: number, b: number, eps = 1e-6): boolean {
   ok(s.stats.lifetimeCredits > 0, "lifetimeCredits tracked");
 }
 
+// 6b. The whole production chain is sellable (the copper chain used to be a
+// dead end that only yielded blueprints).
+{
+  const s = createNewGame();
+  for (const rid of SELLABLE_RESOURCES) {
+    s.resources[rid] = 10;
+  }
+  for (const rid of SELLABLE_RESOURCES) {
+    const gain = sellResource(s, rid, 1);
+    ok(gain > 0, `chain: ${rid} is sellable for credits`);
+    ok(near(s.resources[rid], 0), `chain: selling ${rid} clears it`);
+  }
+  // Deeper products must be worth more per unit than raw ore.
+  ok(
+    SELL_PRICES.alloy > SELL_PRICES.circuit &&
+      SELL_PRICES.circuit > SELL_PRICES.components,
+    "chain: deeper products sell for more",
+  );
+}
+
+// 6c. One-click "sell all" liquidates every sellable resource in a single
+// call, leaving non-sellable stock (research / blueprints) untouched.
+{
+  const s = createNewGame();
+  for (const rid of SELLABLE_RESOURCES) s.resources[rid] = 10;
+  s.resources.research = 42;
+  s.resources.blueprint = 7;
+  const c0 = s.resources.credits;
+  const l0 = s.stats.lifetimeCredits;
+  const expected = SELLABLE_RESOURCES.reduce((sum, rid) => sum + 10 * SELL_PRICES[rid], 0);
+  const gained = sellAllResources(s);
+  ok(near(gained, expected), "sell all: returns the summed market value");
+  ok(near(s.resources.credits, c0 + expected), "sell all: credits increased by total");
+  ok(near(s.stats.lifetimeCredits, l0 + expected), "sell all: lifetimeCredits tracked");
+  for (const rid of SELLABLE_RESOURCES) {
+    ok(near(s.resources[rid], 0), `sell all: clears ${rid}`);
+  }
+  ok(s.resources.research === 42, "sell all: research is not liquidated");
+  ok(s.resources.blueprint === 7, "sell all: blueprints are not liquidated");
+}
+
+// 6d. Sell-all honours the live market multiplier (positive and negative),
+// and an empty inventory is a harmless no-op.
+{
+  // Empty-handed no-op.
+  const empty = createNewGame();
+  ok(sellAllResources(empty) === 0, "sell all: empty inventory returns 0");
+  ok(empty.resources.credits === 0, "sell all: empty inventory gains nothing");
+
+  // Baseline (no events).
+  const base = createNewGame();
+  base.resources.ore = 100;
+  const baseGain = sellAllResources(base);
+  ok(near(baseGain, 100 * SELL_PRICES.ore), "sell all: baseline = amount × price");
+
+  // Market boom (+50% price) should beat the baseline.
+  const boom = createNewGame();
+  boom.resources.ore = 100;
+  boom.stats.prestigeCount = 1; // unlock events
+  boom.activeEvents.push({ id: "marketBoom", remaining: 10, total: 10 });
+  const boomGain = sellAllResources(boom);
+  ok(boomGain > baseGain, "sell all: market boom raises the payout above baseline");
+  ok(near(boomGain, 100 * SELL_PRICES.ore * 1.5), "sell all: market boom applies ×1.5");
+
+  // Supply glut (-40% price) should undercut the baseline.
+  const glut = createNewGame();
+  glut.resources.ore = 100;
+  glut.stats.prestigeCount = 1;
+  glut.activeEvents.push({ id: "supplyGlut", remaining: 10, total: 10 });
+  const glutGain = sellAllResources(glut);
+  ok(glutGain < baseGain, "sell all: supply glut lowers the payout below baseline");
+  ok(near(glutGain, 100 * SELL_PRICES.ore * 0.6), "sell all: supply glut applies ×0.6");
+}
+
 // 7. Negative / zero dt is safe.
 {
   const s = createNewGame();
@@ -167,12 +246,12 @@ function near(a: number, b: number, eps = 1e-6): boolean {
   ok(s.resources.ore === o0, "negative dt does nothing");
 }
 
-// 8. Prestige computation + reset.
+// 8. Prestige computation + reset. Reward is based on THIS RUN's peak income.
 {
   const s = createNewGame();
-  s.stats.lifetimeCredits = 500_000; // at divisor 5000 -> sqrt(100)=10
-  ok(pendingCoreData(s) === 10, "pendingCoreData = 10 at 500k (divisor 5000)");
-  ok(canPrestige(s), "canPrestige true at threshold");
+  s.runPeakCreditsPerSec = 500; // divisor 5 -> sqrt(100) = 10
+  ok(pendingCoreData(s) === 10, "pendingCoreData = 10 at 500 cps (divisor 5)");
+  ok(canPrestige(s), "canPrestige true above the cps threshold");
   s.permanentUpgrades.fasterBoot = 1;
   const cd0 = s.coreData;
   const gained = doPrestige(s);
@@ -184,17 +263,19 @@ function near(a: number, b: number, eps = 1e-6): boolean {
   ok(s.stats.prestigeCount === 1, "prestige count incremented");
 }
 
-// 8b. Prestige cannot be farmed by repeating at the same lifetime credits.
+// 8b. Prestige reward is run-scoped: the peak resets with the run, so you must
+// rebuild momentum each run — but no run's payout is ever eaten by a global
+// entitlement (the old lifetime-delta model punished frequent prestiges).
 {
   const s = createNewGame();
-  s.stats.lifetimeCredits = 500_000; // raw entitlement 10
-  ok(doPrestige(s) === 10, "first prestige grants the full entitlement");
-  ok(pendingCoreData(s) === 0, "nothing pending right after claiming");
-  ok(!canPrestige(s), "cannot prestige again without new credits");
-  s.stats.lifetimeCredits = 2_000_000; // raw entitlement 20 -> delta 10
-  ok(pendingCoreData(s) === 10, "next prestige grants only the delta");
-  ok(doPrestige(s) === 10, "second prestige grants the delta");
-  ok(s.coreData === 20, "coreData totals 20 after two prestiges");
+  s.runPeakCreditsPerSec = 500; // raw entitlement 10
+  ok(doPrestige(s) === 10, "first prestige grants its run's entitlement");
+  ok(s.runPeakCreditsPerSec === 0, "run peak resets after prestige");
+  ok(pendingCoreData(s) === 0, "nothing pending right after prestige");
+  ok(!canPrestige(s), "cannot prestige until the new run ramps up");
+  s.runPeakCreditsPerSec = 2_000; // sqrt(400) = 20
+  ok(doPrestige(s) === 20, "next run pays out on its own peak");
+  ok(s.coreData === 30, "coreData accumulates across runs");
 }
 
 // 9. Offline simulation caps and produces.

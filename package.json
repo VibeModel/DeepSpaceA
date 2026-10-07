@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "tsx test/core.test.ts && tsx test/power.test.ts && tsx test/achievements.test.ts && tsx test/format.test.ts && tsx test/visual.test.ts && tsx test/planets.test.ts"
+    "test": "tsx test/core.test.ts && tsx test/power.test.ts && tsx test/recipes.test.ts && tsx test/achievements.test.ts && tsx test/format.test.ts && tsx test/visual.test.ts && tsx test/planets.test.ts && tsx test/stargate.test.ts && tsx test/stellar.test.ts && tsx test/events.test.ts && tsx test/contracts.test.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

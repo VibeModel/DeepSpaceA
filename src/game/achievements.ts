@@ -4,6 +4,7 @@
 // They are stored on GameState.achievements and survive prestige.
 // Pure module (no DOM) so it can be unit-tested directly.
 
+import { BUILDING_ORDER } from "./balance";
 import type { AchievementId, GameState } from "./types";
 
 export interface AchievementDefinition {
@@ -17,8 +18,9 @@ export interface AchievementDefinition {
 }
 
 function maxBuilding(s: GameState): number {
-  const b = s.buildings;
-  return Math.max(b.miningDrone, b.solarArray, b.furnace, b.factory, b.laboratory);
+  let m = 0;
+  for (const id of BUILDING_ORDER) m = Math.max(m, s.buildings[id] || 0);
+  return m;
 }
 
 function ownedTechs(s: GameState): number {
@@ -31,7 +33,7 @@ function ownedTechs(s: GameState): number {
 
 export const ACHIEVEMENTS: AchievementDefinition[] = [
   { id: "firstOre", name: "初次着陆", icon: "⛏", description: "开采出第一份铁矿。", target: 1, metric: (s) => s.stats.totalOre },
-  { id: "firstDrone", name: "首台无人机", icon: "🤖", description: "购买第一台采矿无人机。", target: 1, metric: (s) => s.buildings.miningDrone },
+  { id: "firstDrone", name: "首台钻机", icon: "⛏", description: "购买第一台铁矿钻机。", target: 1, metric: (s) => s.buildings.miningDrone },
   { id: "smelter", name: "熔炼上线", icon: "🔥", description: "建造第一座熔炼炉。", target: 1, metric: (s) => s.buildings.furnace },
   { id: "assembly", name: "制造链", icon: "⚙", description: "建造第一座制造厂。", target: 1, metric: (s) => s.buildings.factory },
   { id: "lab", name: "科研启航", icon: "🔬", description: "建造第一座实验室。", target: 1, metric: (s) => s.buildings.laboratory },
@@ -51,6 +53,12 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   { id: "gridStable", name: "大型电网", icon: "🔌", description: "电网供电达到 100/s。", target: 100, metric: (s) => s.rates?.powerSupply ?? 0 },
   { id: "highThroughput", name: "高效生产", icon: "📈", description: "信用点收入达到 100/s。", target: 100, metric: (s) => s.stats.bestCreditsPerSec },
   { id: "timeTraveler", name: "时间旅者", icon: "⏱", description: "累计游玩 1 小时。", target: 3.6e6, metric: (s) => s.stats.lifetimePlayTime },
+
+  // Copper / recipe chain.
+  { id: "firstCopper", name: "铜链启航", icon: "🔶", description: "开采出第一份铜矿。", target: 1, metric: (s) => s.stats.totalCopperOre },
+  { id: "circuitMaker", name: "电路时代", icon: "🔬", description: "生产出第一块电路板。", target: 1, metric: (s) => s.stats.totalCircuit },
+  { id: "alloySmith", name: "合金铸造", icon: "🧱", description: "冶炼出第一块合金。", target: 1, metric: (s) => s.stats.totalAlloy },
+  { id: "blueprintArchitect", name: "蓝图设计师", icon: "📘", description: "合成出第一份蓝图。", target: 1, metric: (s) => s.stats.totalBlueprints },
 ];
 
 // A default map with EVERY achievement id present and false. This must be

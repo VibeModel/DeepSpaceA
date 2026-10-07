@@ -1,32 +1,64 @@
 import {
-  PRESTIGE_THRESHOLD_CREDITS,
-  PRESTIGE_DIVISOR,
+  PRESTIGE_THRESHOLD_CPS,
+  PRESTIGE_CPS_DIVISOR,
 } from "./balance";
 import { computeModifiers, applyTechUnlocks } from "./research";
 import type { GameState, PlanetId } from "./types";
-import { freshRunState } from "./state";
+import { freshRunState, applyRunStartBonuses } from "./state";
 import { capNumber } from "./num";
 import { planetUnlocked } from "./planets";
 
-// Raw core-data entitlement from lifetime credits, BEFORE the gain multiplier.
-// Lifetime credits are cumulative and never reset, so the entitlement only ever
-// grows; the delta above what was already claimed is what a prestige grants.
-function rawEntitlement(state: GameState): number {
-  return Math.floor(Math.sqrt(state.stats.lifetimeCredits / PRESTIGE_DIVISOR));
+// Fields that survive a prestige (layer 1) — and an ascension (layer 2). This is
+// the exact complement of freshRunState()'s Omit list; keep the two in sync so a
+// new persistent field is never silently wiped by a reset.
+export const META_KEYS = [
+  "coreData",
+  "lifetimeCoreData",
+  "blueprints",
+  "permanentUpgrades",
+  "achievements",
+  "stats",
+  "nextPlanet",
+  // Megastructure + second layer (survive BOTH resets).
+  "stargateLevel",
+  "stellarCharts",
+  "lifetimeStellarCharts",
+  "chartsGranted",
+  "stellarUpgrades",
+  "ascensionCount",
+  "rngSeed",
+] as const satisfies readonly (keyof GameState)[];
+
+export type MetaSnapshot = Pick<GameState, (typeof META_KEYS)[number]>;
+
+export function snapshotMeta(s: GameState): MetaSnapshot {
+  const out = {} as MetaSnapshot;
+  for (const k of META_KEYS) (out as Record<string, unknown>)[k] = s[k];
+  return out;
 }
 
-// Core Data the player would gain if they prestiged right now. Only the part not
-// already claimed counts, so a prestige at the same lifetime credits yields 0.
+export function restoreMeta(s: GameState, snap: MetaSnapshot): void {
+  for (const k of META_KEYS) (s as unknown as Record<string, unknown>)[k] = snap[k];
+}
+
+// Raw core-data entitlement from THIS RUN's peak credit income, BEFORE the gain
+// multiplier. Run-scoped: each run pays out on its own merit, so prestiging
+// frequently never forfeits anything (the old lifetime-delta model did).
+function rawEntitlement(state: GameState): number {
+  return Math.floor(Math.sqrt(state.runPeakCreditsPerSec / PRESTIGE_CPS_DIVISOR));
+}
+
+// Core Data the player would gain if they prestiged right now.
 export function pendingCoreData(state: GameState): number {
   const mods = computeModifiers(state);
-  const pendingRaw = rawEntitlement(state) - state.prestigeGranted;
-  if (pendingRaw <= 0) return 0;
-  return capNumber(Math.floor(pendingRaw * mods.prestigeGainMult));
+  const raw = rawEntitlement(state);
+  if (raw <= 0) return 0;
+  return capNumber(Math.floor(raw * mods.prestigeGainMult));
 }
 
 export function canPrestige(state: GameState): boolean {
   return (
-    state.stats.lifetimeCredits >= PRESTIGE_THRESHOLD_CREDITS &&
+    state.runPeakCreditsPerSec >= PRESTIGE_THRESHOLD_CPS &&
     pendingCoreData(state) > 0
   );
 }
@@ -42,27 +74,15 @@ export function doPrestige(state: GameState, targetPlanet?: PlanetId): number {
   state.coreData += gained;
   state.lifetimeCoreData += gained;
 
-  // Snapshot persistent fields.
-  const coreData = state.coreData;
-  const lifetimeCoreData = state.lifetimeCoreData;
-  const permanentUpgrades = state.permanentUpgrades;
-  const achievements = state.achievements;
-  const stats = state.stats;
-  const nextPlanet = state.nextPlanet;
-  // Claim the raw entitlement now; future prestiges only grant the delta above it.
-  const claimed = rawEntitlement(state);
+  // Snapshot every persistent field, then reset the run and restore them.
+  const meta = snapshotMeta(state);
 
-  // Reset run-specific state (planet back to homeworld, regions cleared).
+  // Reset run-specific state (planet back to homeworld, regions cleared, run
+  // peak income zeroed so the next run starts its own tally).
   Object.assign(state, freshRunState());
 
   // Restore persistent fields.
-  state.coreData = coreData;
-  state.lifetimeCoreData = lifetimeCoreData;
-  state.permanentUpgrades = permanentUpgrades;
-  state.achievements = achievements;
-  state.stats = stats;
-  state.nextPlanet = nextPlanet;
-  state.prestigeGranted = claimed;
+  restoreMeta(state, meta);
 
   // Land the new run on the chosen planet (falling back safely if it is not
   // actually unlocked). The selection is applied exactly here — never mid-run —
@@ -78,11 +98,8 @@ export function doPrestige(state: GameState, targetPlanet?: PlanetId): number {
   state.stats.prestigeCount += 1;
   state.stats.currentRunStart = Date.now();
 
-  // Re-apply run-start permanent bonuses (e.g. Faster Boot).
-  const fb = state.permanentUpgrades.fasterBoot || 0;
-  if (fb > 0) {
-    state.buildings.miningDrone = 2 * fb;
-  }
+  // Re-apply run-start permanent bonuses (e.g. Faster Boot / Assembler Boot).
+  applyRunStartBonuses(state);
   // Techs were wiped by the reset, so recompute unlock flags from any
   // permanent upgrades that grant them (e.g. Automated Logistics).
   applyTechUnlocks(state);

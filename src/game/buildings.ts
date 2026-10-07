@@ -1,9 +1,21 @@
-import { BUILDINGS, MILESTONES, MILESTONE_BONUS, MAX_BUILDINGS } from "./balance";
+import {
+  BUILDINGS,
+  BUILDING_ORDER,
+  MILESTONES,
+  MILESTONE_BONUS,
+  MAX_BUILDINGS,
+} from "./balance";
 import type { BuildingId, BuildingDefinition, GameState } from "./types";
 import { capNumber, safePow } from "./num";
 import { costMultFromPlanet } from "./planets";
+import { stargateCostMult } from "./stargate";
+import { stellarCostMult } from "./stellar";
 
-export const BUILDING_LIST: BuildingDefinition[] = Object.values(BUILDINGS);
+// Ordered by BUILDING_ORDER so cards, keyboard shortcuts and the buy order all
+// share one sequence.
+export const BUILDING_LIST: BuildingDefinition[] = BUILDING_ORDER.map(
+  (id) => BUILDINGS[id],
+);
 
 export function getBuilding(id: BuildingId): BuildingDefinition {
   return BUILDINGS[id];
@@ -20,8 +32,16 @@ export function buildingCost(
   // Smart Logistics reduces cost growth.
   let growth = def.costGrowth;
   if (state.techs.smartLogistics) growth -= 0.05;
-  // Planet modifiers can raise/lower the base cost (e.g. Pyra ×1.15).
-  return capNumber(def.baseCost * safePow(growth, owned) * costMultFromPlanet(state));
+  // Planet modifiers can raise/lower the base cost (e.g. Pyra ×1.15). The
+  // megastructure / second-layer cost reductions must be applied HERE too:
+  // buildingCost intentionally does not go through computeModifiers.
+  return capNumber(
+    def.baseCost *
+      safePow(growth, owned) *
+      costMultFromPlanet(state) *
+      stargateCostMult(state) *
+      stellarCostMult(state),
+  );
 }
 
 // How many milestone bonus tiers a building currently has.
@@ -63,10 +83,15 @@ export function buildingUnlocked(state: GameState, id: BuildingId): boolean {
     case "solarArray":
       // Power matters once you start automating, so expose it with the first drone.
       return state.buildings.miningDrone >= 1;
+    case "copperMine":
+      // The copper chain opens up once a furnace exists to smelt it.
+      return state.buildings.furnace >= 1;
     case "furnace":
       return state.buildings.miningDrone >= 1;
     case "factory":
       return state.buildings.furnace >= 1;
+    case "assembler":
+      return state.buildings.factory >= 1;
     case "laboratory":
       return state.buildings.factory >= 1;
   }

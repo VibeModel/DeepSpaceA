@@ -4,7 +4,7 @@ import { computeModifiers } from "../src/game/research";
 import { computePower } from "../src/game/power";
 import { simulate } from "../src/game/simulation";
 import { canPrestige } from "../src/game/prestige";
-import { BASE_POWER_SUPPLY } from "../src/game/balance";
+import { BASE_POWER_SUPPLY, SELLABLE_RESOURCES } from "../src/game/balance";
 
 let passed = 0;
 let failed = 0;
@@ -68,7 +68,7 @@ function near(a: number, b: number, eps = 1e-6): boolean {
   ok(r.powerFactor < 1, "simulate: brownout active");
   ok(near(r.powerFactor, r.powerSupply / r.powerDemand), "simulate: factor consistent");
   ok(
-    near(r.oreProd, r.powerFactor),
+    near(r.production.ore, r.powerFactor),
     "simulate: mining output scaled by factor",
   );
 }
@@ -80,14 +80,14 @@ function near(a: number, b: number, eps = 1e-6): boolean {
   s.resources.ore = 1e9; // plenty of ore, only power is short
   simulate(s, 1000);
   ok(s.rates.powerFactor < 1, "no-false-shortage: brownout active");
-  ok(s.rates.oreShortage === false, "no-false-shortage: not blamed on ore");
+  ok(s.rates.processors.smeltSteel.shortage === false, "no-false-shortage: not blamed on ore");
 
   // With no ore at all a genuine shortage must still be reported.
   const s2 = createNewGame();
   s2.buildings.furnace = 3;
   s2.resources.ore = 0;
   simulate(s2, 1000);
-  ok(s2.rates.oreShortage === true, "no-false-shortage: real shortage still reported");
+  ok(s2.rates.processors.smeltSteel.shortage === true, "no-false-shortage: real shortage still reported");
 }
 
 // --- structured metrics consistency ---
@@ -96,12 +96,13 @@ function near(a: number, b: number, eps = 1e-6): boolean {
   s.buildings.furnace = 4;
   s.resources.ore = 1e9;
   simulate(s, 1000);
-  ok(near(s.rates.furnaceCap, 4), "metrics: furnace capacity = count * inputRate");
-  ok(near(s.rates.furnaceInput, 4), "metrics: furnace input = consumed/s");
-  ok(near(s.rates.furnaceYield, 1), "metrics: base yield = 1");
+  const smeltSteel = s.rates.processors.smeltSteel;
+  ok(near(smeltSteel.cap, 4), "metrics: furnace capacity = count * inputRate");
+  ok(near(smeltSteel.input, 4), "metrics: furnace input = consumed/s");
+  ok(near(smeltSteel.yield, 1), "metrics: base yield = 1");
   s.techs.advancedAlloys = 1; // steel yield +25%
   simulate(s, 1000);
-  ok(near(s.rates.furnaceYield, 1.25), "metrics: yield includes tech bonus");
+  ok(near(s.rates.processors.smeltSteel.yield, 1.25), "metrics: yield includes tech bonus");
 }
 
 // --- balance regression: first prestige reachable in 60 minutes ---
@@ -111,12 +112,16 @@ function near(a: number, b: number, eps = 1e-6): boolean {
   s.flags.autoSellUnlocked = true;
   s.flags.autoBuyUnlocked = true;
   s.flags.autoResearchUnlocked = true;
-  s.autoSell = { ore: true, steel: true, components: true };
+  for (const r of SELLABLE_RESOURCES) {
+    s.autoSell[r] = r === "ore" || r === "steel" || r === "components";
+  }
   s.autoBuy = {
     miningDrone: true,
     solarArray: true,
+    copperMine: false,
     furnace: true,
     factory: true,
+    assembler: false,
     laboratory: true,
   };
   s.autoResearch = true;
@@ -125,6 +130,12 @@ function near(a: number, b: number, eps = 1e-6): boolean {
   const MAX_STEPS = 3600; // 60 minutes at 1s steps
   let steps = 0;
   while (steps < MAX_STEPS && !canPrestige(s)) {
+    // applyTechUnlocks() re-derives the QoL flags from owned techs on every
+    // purchase, so re-assert them each step: we test production/power pacing,
+    // not the unlock timing of the automation techs.
+    s.flags.autoSellUnlocked = true;
+    s.flags.autoBuyUnlocked = true;
+    s.flags.autoResearchUnlocked = true;
     simulate(s, 1000);
     steps++;
   }

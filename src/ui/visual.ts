@@ -6,9 +6,60 @@
 // does not affect game balance, which is why the constants live here rather
 // than in game/balance.ts.
 
-import type { BuildingId, GameState } from "../game/types";
+import { BUILDING_ORDER, MILESTONES } from "../game/balance";
+import type {
+  BuildingId,
+  GameState,
+  RecipeId,
+  RecipeOutputId,
+  ResourceId,
+} from "../game/types";
 
-export type StageId = "mining" | "smelting" | "manufacturing" | "research";
+// One pipeline stage per producer plus one per recipe, then research. These map
+// 1:1 onto the FLOW panel stages in render.ts.
+export type StageId =
+  | "mining"
+  | "copperMining"
+  | RecipeId
+  | "research";
+
+// Which output id each stage's throughput is read from.
+const STAGE_OUTPUT: Record<StageId, RecipeOutputId> = {
+  mining: "ore",
+  copperMining: "copperOre",
+  smeltSteel: "steel",
+  smeltCopper: "copper",
+  makeComponents: "components",
+  makeCircuit: "circuit",
+  makeAlloy: "alloy",
+  synthesizeBlueprint: "blueprints",
+  research: "research",
+};
+
+// Outputs summed for the overall planet intensity (credits excluded).
+const MATERIAL_OUTPUTS: RecipeOutputId[] = [
+  "ore",
+  "steel",
+  "components",
+  "research",
+  "copperOre",
+  "copper",
+  "circuit",
+  "alloy",
+];
+
+// All stage ids, in display order.
+export const STAGE_IDS: StageId[] = [
+  "mining",
+  "copperMining",
+  "smeltSteel",
+  "smeltCopper",
+  "makeComponents",
+  "makeCircuit",
+  "makeAlloy",
+  "synthesizeBlueprint",
+  "research",
+];
 
 // Tunable presentation constants. Values are chosen so that a fresh game shows
 // a dim, calm planet and a mature run lights up a busy one.
@@ -22,8 +73,13 @@ export const VISUAL = {
   // Reference throughput per stage (x/s) for the pipeline sweep speed.
   stageScale: {
     mining: 120,
-    smelting: 40,
-    manufacturing: 15,
+    copperMining: 120,
+    smeltSteel: 40,
+    smeltCopper: 40,
+    makeComponents: 15,
+    makeCircuit: 6,
+    makeAlloy: 3,
+    synthesizeBlueprint: 1,
     research: 6,
   } as Record<StageId, number>,
   // Planet breathing period (s): slow when idle, quick when busy.
@@ -48,6 +104,33 @@ export const VISUAL = {
   creditActiveFloor: 0.02,
   // Any building count reaching this unlocks the planetary ring.
   ringThreshold: 25,
+
+  // ---- Per-building colony skyline ("how many of what") ----
+  // Building count at which a cluster reaches full height / glow / pulse speed.
+  // Deliberately generous: the tower COUNT steps at the milestone tiers
+  // (10/25/50/100), so the height channel should keep responding well past them
+  // instead of flattening out at the first milestone.
+  nodeScale: 250,
+  towerMinH: 7, // px, a single building
+  towerMaxH: 32, // px, a saturated colony
+  // Towers drawn per cluster; how many show is 1 + the milestone tier reached.
+  towerPool: 5,
+  nodePulseMax: 3.6, // s, one lonely building pulses slowly
+  nodePulseMin: 1.1, // s, a large colony pulses quickly
+  // Smallest log-normalised fill a single (owned > 0) cluster gets, so the very
+  // first building is clearly visible rather than a bare minimum.
+  nodeFillFloor: 0.14,
+
+  // ---- Convoy ships crossing the orbital lanes ----
+  // Fixed DOM pool; only this many can ever be visible.
+  convoyPool: 10,
+  // Total buildings at which the full convoy is out.
+  convoyScale: 40,
+  // Orbit period (s) for a convoy ship: slow at first, quick once busy.
+  convoyDurMax: 26,
+  convoyDurMin: 8,
+  // Convoy orbit radii (px), alternated so ships do not overlap.
+  convoyRadii: [70, 78, 64],
 } as const;
 
 // Squash an unbounded non-negative value into [0, 1) using tanh. Guards
@@ -75,24 +158,32 @@ function lerp(a: number, b: number, t: number): number {
 }
 
 export interface VisualInput {
-  // Stage throughput per second (gross).
-  oreProd: number;
-  steelProd: number;
-  compProd: number;
-  researchProd: number;
+  // Gross output per second keyed by output id (resources + blueprints).
+  outputs: Record<RecipeOutputId, number>;
   // Net credits per second (drives the top-bar pulse).
   creditsRate: number;
-  // Bottleneck flags.
-  oreShortage: boolean;
-  steelShortage: boolean;
-  oreAccumulating: boolean;
-  steelAccumulating: boolean;
+  // Any processor starved or accumulating (drives the amber warning state).
+  bottleneck: boolean;
   // Owned building counts.
   buildings: Record<BuildingId, number>;
   // Current power-grid throttle factor (1 = fine, <1 = brownout).
   powerFactor: number;
   // Production Analytics gate for the amber warning state.
   analyticsUnlocked: boolean;
+}
+
+// One building type's on-screen presence in the colony skyline. Everything is
+// driven by the owned count, so the strip literally shows "how many of what".
+export interface BuildingNodeVisual {
+  id: BuildingId;
+  owned: number;
+  visible: boolean; // owned > 0 -> the cluster appears
+  height: number; // px tower height
+  towers: number; // towers drawn (1..towerPool), grows with milestone tiers
+  glow: number; // 0..1 opacity / halo strength
+  pulseDur: number; // seconds per pulse (faster with more buildings)
+  tier: number; // how many count tiers (10/25/50/100) have been reached
+  fill: number; // 0..1 normalised count, for bars / arcs
 }
 
 export interface VisualParams {
@@ -107,23 +198,37 @@ export interface VisualParams {
   flowDur: Record<StageId, number>; // seconds per stage sweep
   dotCount: number; // lit base-light dots (0..dotPool)
   strained: boolean; // show amber bottleneck warning
-  hasIndustry: boolean; // furnace/factory built -> outer orbit appears
+  hasIndustry: boolean; // a processor is built -> outer orbit appears
   hasRing: boolean; // a building hit ringThreshold -> planetary ring
+  // Per-building presence, in BUILDING_ORDER.
+  nodes: BuildingNodeVisual[];
+  totalBuildings: number;
+  convoy: number; // visible convoy ships (0..convoyPool)
+  convoyDur: number; // seconds per convoy orbit
 }
 
 // Read the subset of game state the visual layer needs.
 export function toVisualInput(state: GameState): VisualInput {
   const r = state.rates;
+  const outputs = {} as Record<RecipeOutputId, number>;
+  for (const key of Object.keys(r.production) as ResourceId[]) {
+    outputs[key] = r.production[key];
+  }
+  outputs.blueprints = r.net?.blueprints ?? 0;
+
+  let bottleneck = false;
+  for (const key of Object.keys(r.processors) as RecipeId[]) {
+    const pr = r.processors[key];
+    if (pr && (pr.shortage || pr.accumulating)) {
+      bottleneck = true;
+      break;
+    }
+  }
+
   return {
-    oreProd: r.oreProd,
-    steelProd: r.steelProd,
-    compProd: r.compProd,
-    researchProd: r.researchProd,
-    creditsRate: r.credits,
-    oreShortage: r.oreShortage,
-    steelShortage: r.steelShortage,
-    oreAccumulating: r.oreAccumulating,
-    steelAccumulating: r.steelAccumulating,
+    outputs,
+    creditsRate: r.net?.credits ?? 0,
+    bottleneck,
     buildings: { ...state.buildings },
     powerFactor: r.powerFactor ?? 1,
     analyticsUnlocked: state.flags.analyticsUnlocked,
@@ -131,7 +236,8 @@ export function toVisualInput(state: GameState): VisualInput {
 }
 
 export function deriveVisualParams(i: VisualInput): VisualParams {
-  const totalProd = i.oreProd + i.steelProd + i.compProd + i.researchProd;
+  let totalProd = 0;
+  for (const key of MATERIAL_OUTPUTS) totalProd += i.outputs[key] || 0;
   const intensity = clamp01(
     VISUAL.idleFloor + (1 - VISUAL.idleFloor) * norm(totalProd, VISUAL.prodScale),
   );
@@ -140,7 +246,7 @@ export function deriveVisualParams(i: VisualInput): VisualParams {
   const b = i.buildings;
   let bTotal = 0;
   let maxOwned = 0;
-  for (const key of Object.keys(b) as BuildingId[]) {
+  for (const key of BUILDING_ORDER) {
     const n = b[key] || 0;
     bTotal += n;
     if (n > maxOwned) maxOwned = n;
@@ -150,21 +256,42 @@ export function deriveVisualParams(i: VisualInput): VisualParams {
   const dotCount = Math.round(fill * VISUAL.dotPool);
   const activity = clamp01(fill * 0.7 + intensity * 0.3);
 
-  const flowDur: Record<StageId, number> = {
-    mining: lerp(VISUAL.flowMax, VISUAL.flowMin, norm(i.oreProd, VISUAL.stageScale.mining)),
-    smelting: lerp(VISUAL.flowMax, VISUAL.flowMin, norm(i.steelProd, VISUAL.stageScale.smelting)),
-    manufacturing: lerp(
-      VISUAL.flowMax,
-      VISUAL.flowMin,
-      norm(i.compProd, VISUAL.stageScale.manufacturing),
-    ),
-    research: lerp(VISUAL.flowMax, VISUAL.flowMin, norm(i.researchProd, VISUAL.stageScale.research)),
-  };
+  // Per-building nodes. Size/glow/pulse all come from the owned count, so the
+  // scene reads as a colony whose parts grow with how much you have built.
+  const nodes: BuildingNodeVisual[] = BUILDING_ORDER.map((id) => {
+    const owned = b[id] || 0;
+    const raw = logNorm(owned, VISUAL.nodeScale); // 0 at <= 1
+    const nodeFill = owned <= 0 ? 0 : Math.max(VISUAL.nodeFillFloor, raw);
+    // Reuse the gameplay milestone tiers so the visual "spikes" always line up
+    // with the ×2 production milestones (single source of truth).
+    let tier = 0;
+    for (const m of MILESTONES) if (owned >= m) tier++;
+    return {
+      id,
+      owned,
+      visible: owned > 0,
+      height: lerp(VISUAL.towerMinH, VISUAL.towerMaxH, nodeFill),
+      // One tower at the first building, then one more per milestone tier.
+      towers: Math.min(VISUAL.towerPool, 1 + tier),
+      glow: owned <= 0 ? 0 : clamp01(0.34 + 0.66 * nodeFill),
+      pulseDur: lerp(VISUAL.nodePulseMax, VISUAL.nodePulseMin, nodeFill),
+      tier,
+      fill: nodeFill,
+    };
+  });
+  // Convoy ships scale from the TOTAL building count on their own curve, so
+  // the lanes fill up independently of the planet's light pool.
+  const convoyFill = clamp01(bTotal / VISUAL.convoyScale);
+  const convoy = Math.round(convoyFill * VISUAL.convoyPool);
+
+  const flowDur = {} as Record<StageId, number>;
+  for (const stage of STAGE_IDS) {
+    const rate = i.outputs[STAGE_OUTPUT[stage]] || 0;
+    flowDur[stage] = lerp(VISUAL.flowMax, VISUAL.flowMin, norm(rate, VISUAL.stageScale[stage]));
+  }
 
   const strained =
-    i.powerFactor < 0.995 ||
-    (i.analyticsUnlocked &&
-      (i.oreShortage || i.steelShortage || i.oreAccumulating || i.steelAccumulating));
+    i.powerFactor < 0.995 || (i.analyticsUnlocked && i.bottleneck);
 
   const creditIntensity = norm(i.creditsRate, VISUAL.creditScale);
 
@@ -180,7 +307,12 @@ export function deriveVisualParams(i: VisualInput): VisualParams {
     flowDur,
     dotCount,
     strained,
-    hasIndustry: (b.furnace || 0) + (b.factory || 0) > 0,
+    hasIndustry:
+      (b.furnace || 0) + (b.factory || 0) + (b.assembler || 0) > 0,
     hasRing: maxOwned >= VISUAL.ringThreshold,
+    nodes,
+    totalBuildings: bTotal,
+    convoy,
+    convoyDur: lerp(VISUAL.convoyDurMax, VISUAL.convoyDurMin, activity),
   };
 }

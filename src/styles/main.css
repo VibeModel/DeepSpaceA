@@ -94,9 +94,17 @@ body {
 /* ---------- Layout ---------- */
 .main-grid {
   display: grid;
-  grid-template-columns: 320px 1fr 300px;
+  grid-template-columns: 320px 1fr;
   gap: 14px;
   align-items: start;
+}
+
+/* Right-hand column: production stacked over statistics. */
+.main-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
 }
 
 .panel {
@@ -232,6 +240,57 @@ button.big {
   opacity: 0.5;
 }
 
+/* ---------- Recipe allocation (processors) ---------- */
+.recipe-mix {
+  margin: 6px 0 8px;
+  border-top: 1px dashed var(--border);
+  padding-top: 6px;
+}
+.recipe-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 11px;
+}
+.recipe-row .r-icon {
+  font-size: 14px;
+  width: 16px;
+  text-align: center;
+}
+.recipe-row .r-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.recipe-row .r-name {
+  color: #eaf2ff;
+  font-weight: 600;
+}
+.recipe-row .r-io {
+  color: var(--muted);
+}
+.recipe-row .r-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.recipe-row .r-ctrl button {
+  padding: 1px 8px;
+  line-height: 1.4;
+  font-size: 13px;
+}
+.recipe-row .r-count {
+  min-width: 34px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--accent);
+}
+.readout .value.bp {
+  color: var(--accent-2);
+}
+
 /* ---------- Utilization bar ---------- */
 .bar {
   height: 7px;
@@ -334,6 +393,16 @@ button.big {
 }
 .manual button {
   flex: 1;
+}
+/* The six per-resource sell buttons are too many to sit on one row inside the
+   ～290px panel: as flex items they hit their min-content width and clip the
+   last button. Lay them out as a 3-wide grid instead (2 tidy rows). */
+.manual.sell-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.manual.sell-grid button {
+  min-width: 0;
 }
 
 /* ---------- Tabs ---------- */
@@ -717,13 +786,10 @@ textarea {
 
 /* ---------- Responsive layout ---------- */
 
-/* Mid screens: three columns -> two (STATISTICS spans the full row). */
+/* Mid screens: narrower building column. */
 @media (max-width: 1180px) {
   .main-grid {
     grid-template-columns: 300px 1fr;
-  }
-  #panel-stats {
-    grid-column: 1 / -1;
   }
 }
 
@@ -731,9 +797,6 @@ textarea {
 @media (max-width: 980px) {
   .main-grid {
     grid-template-columns: 1fr;
-  }
-  #panel-stats {
-    grid-column: auto;
   }
 }
 
@@ -799,4 +862,188 @@ textarea {
   kbd {
     display: none;
   }
+}
+
+/* ---------- Colony skyline belt (building counts, at a glance) ----------
+   One cluster per building type. Tower height follows the owned count, the
+   number of towers follows the milestone tier, and the cluster label is the
+   exact count. --tower-h / --node-glow / --node-pulse-dur come from visual.ts. */
+.colony-belt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 7px 8px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+  pointer-events: none; /* purely decorative */
+}
+.colony-cluster {
+  flex: 1 1 54px;
+  min-width: 46px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 3px;
+  opacity: 0.26;
+  transition: opacity 320ms ease;
+}
+.colony-cluster.on {
+  opacity: 1;
+}
+.cc-sky {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  height: 34px;
+}
+.cc-tower {
+  width: 4px;
+  height: 0;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(180deg, var(--accent-2), #16324a);
+  opacity: 0;
+  transform: scaleY(0.25);
+  transform-origin: bottom;
+  transition: opacity 300ms ease, transform 420ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+.cc-tower.on {
+  opacity: calc(0.45 + var(--node-glow, 0.4) * 0.55);
+  transform: scaleY(1);
+  height: var(--tower-h, 8px);
+  animation: towerGlow var(--node-pulse-dur, 2s) ease-in-out infinite;
+  animation-delay: var(--node-delay, 0s);
+}
+/* Stagger the skyline so it reads as a city rather than a bar chart. */
+.cc-tower:nth-child(1).on { height: calc(var(--tower-h, 8px) * 0.68); }
+.cc-tower:nth-child(2).on { height: calc(var(--tower-h, 8px) * 0.92); }
+.cc-tower:nth-child(3).on { height: var(--tower-h, 8px); }
+.cc-tower:nth-child(4).on { height: calc(var(--tower-h, 8px) * 0.8); }
+.cc-tower:nth-child(5).on { height: calc(var(--tower-h, 8px) * 0.6); }
+@keyframes towerGlow {
+  0%, 100% { filter: brightness(0.82); }
+  50% { filter: brightness(1.28); }
+}
+.cc-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted);
+}
+.colony-cluster.on .cc-meta {
+  color: #dfeaff;
+}
+.cc-icon {
+  font-size: 12px;
+}
+.cc-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Random-event bar ---------- */
+.event-bar {
+  display: none; /* shown only while an event is live */
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.event-bar .ev-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ev-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #0c1322;
+  font-size: 12px;
+  position: relative;
+  overflow: hidden;
+}
+.ev-chip.good {
+  border-color: rgba(120, 220, 150, 0.5);
+  color: var(--good);
+}
+.ev-chip.bad {
+  border-color: rgba(240, 130, 130, 0.5);
+  color: var(--warn);
+}
+.ev-chip .ev-icon {
+  font-size: 14px;
+}
+.ev-chip .ev-name {
+  color: inherit;
+}
+.ev-chip .ev-timer {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+.ev-chip .ev-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+}
+.ev-chip .ev-bar > span {
+  display: block;
+  height: 100%;
+  background: currentColor;
+}
+
+/* ---------- Contract cards ---------- */
+.contract-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.contract-card.active {
+  border-color: rgba(150, 120, 240, 0.5);
+}
+.contract-card .c-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.contract-card .c-icon {
+  font-size: 16px;
+}
+.contract-card .c-body {
+  font-size: 14px;
+}
+.contract-card .c-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+.contract-card .c-reward {
+  font-size: 13px;
+}
+.contract-card .c-timer {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.contract-card button {
+  margin-top: 4px;
 }

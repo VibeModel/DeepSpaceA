@@ -13,6 +13,7 @@ import {
   simulate,
   manualMine,
   sellResource,
+  sellAllResources,
 } from "./game/simulation";
 import {
   buyBuilding,
@@ -22,6 +23,20 @@ import {
 import { researchTech, applyTechUnlocks, techLevel } from "./game/research";
 import { buyUpgrade, upgradeLevel } from "./game/upgrades";
 import { doPrestige } from "./game/prestige";
+import { buildStargate, stargateTierName } from "./game/stargate";
+import {
+  buyStellarUpgrade,
+  getStellarUpgrade,
+  stellarLevel,
+} from "./game/stellar";
+import { doAscend } from "./game/ascension";
+import { forceSpawnEvent } from "./game/events";
+import {
+  tickContracts,
+  acceptContract,
+  deliverContract,
+  makeContractOffer,
+} from "./game/contracts";
 import {
   planetUnlocked,
   PLANET_LIST,
@@ -31,6 +46,7 @@ import {
   upgradeRegion,
 } from "./game/planets";
 import { evaluateAchievements, getAchievement } from "./game/achievements";
+import { isRecipeUnlocked } from "./game/recipes";
 import { MILESTONES, AUTOSAVE_MS, MANUAL_MINE_AMOUNT, TECHS, UPGRADES } from "./game/balance";
 import type {
   GameState,
@@ -40,6 +56,8 @@ import type {
   UpgradeId,
   PlanetId,
   RegionId,
+  RecipeId,
+  StellarUpgradeId,
 } from "./game/types";
 import * as render from "./ui/render";
 import { loadUiSettings, setNumberFormat, setAnimationLevel, type NumberFormat, type AnimationLevel } from "./ui/settings";
@@ -135,13 +153,7 @@ function detectAchievements(): void {
 }
 
 function buildingName(id: BuildingId): string {
-  return {
-    miningDrone: "采矿无人机",
-    solarArray: "太阳能阵列 Solar Array",
-    furnace: "熔炼炉 Furnace",
-    factory: "制造厂 Factory",
-    laboratory: "实验室 Laboratory",
-  }[id];
+  return getBuilding(id).name;
 }
 
 // ---------- Game loop ----------
@@ -153,6 +165,9 @@ function loop(): void {
   state.stats.lifetimePlayTime += dt;
 
   simulate(state, dt * timeScale);
+  // Contracts run on ONLINE wall-clock time (never scaled, never offline), so
+  // an away player never returns to an expired order.
+  tickContracts(state, dt / 1000);
   detectMilestones();
   detectAchievements();
   detectPlanetUnlocks();
@@ -179,6 +194,12 @@ const handlers: render.Handlers = {
   },
   onSell(res: SellableResource) {
     sellResource(state, res, 1);
+  },
+  onSellAll() {
+    const gained = sellAllResources(state);
+    if (gained > 0) {
+      render.toast("SELL ALL", `出售全部库存 · +${Math.round(gained)} Credits`, "info");
+    }
   },
   onBuyBuilding(id: BuildingId) {
     if (buyBuilding(state, id)) render.feedbackPurchase(id);
@@ -232,6 +253,61 @@ const handlers: render.Handlers = {
       render.toast(
         "REGION UPGRADED",
         `${getRegion(id).name} → Lv.${regionLevel(state, id)}`,
+        "info",
+      );
+    }
+  },
+  onSelectRecipe(bid: BuildingId, rid: RecipeId, delta: number) {
+    // Ignore clicks on recipes that are still locked (defensive: the UI hides
+    // them, but a stale DOM node could linger for a frame).
+    if (!isRecipeUnlocked(state, rid)) return;
+    const mix = state.recipeMix[bid];
+    if (!mix) return;
+    const cur = mix[rid] ?? 0;
+    mix[rid] = Math.max(0, cur + delta);
+    saveGame(state);
+  },
+  onBuildStargate() {
+    if (buildStargate(state)) {
+      saveGame(state);
+      render.toast(
+        "STARGATE ONLINE",
+        `T${state.stargateLevel} · ${stargateTierName(state.stargateLevel) || "结构成型"}`,
+        "info",
+      );
+      render.celebrateScene();
+    }
+  },
+  onAscend() {
+    const gained = doAscend(state);
+    if (gained > 0) {
+      saveGame(state);
+      prevCounts = { ...state.buildings };
+      prevUnlocked = snapshotTrackers();
+      prevPlanetUnlocked = snapshotPlanetUnlocks();
+      render.toast("ASCENSION", `获得 ${gained} 星图 · 第 ${state.ascensionCount} 次升华`, "info");
+      render.celebrateScene();
+    }
+  },
+  onBuyStellarUpgrade(id: StellarUpgradeId) {
+    if (buyStellarUpgrade(state, id)) {
+      saveGame(state);
+      render.toast("CHART UPGRADE", `${getStellarUpgrade(id).name} → Lv.${stellarLevel(state, id)}`, "info");
+    }
+  },
+  onAcceptContract(id: number) {
+    if (acceptContract(state, id)) {
+      saveGame(state);
+      render.toast("CONTRACT", `已接受订单 #${id}`, "info");
+    }
+  },
+  onDeliverContract(id: number) {
+    const before = state.activeContracts.find((c) => c.id === id);
+    if (deliverContract(state, id)) {
+      saveGame(state);
+      render.toast(
+        "CONTRACT COMPLETE",
+        `订单 #${id} 完成 · +${before ? Math.round(before.reward) : 0} Credits`,
         "info",
       );
     }
@@ -292,13 +368,28 @@ const handlers: render.Handlers = {
       case "unlockBuildings":
         state.buildings.miningDrone = Math.max(1, state.buildings.miningDrone);
         state.buildings.solarArray = Math.max(1, state.buildings.solarArray);
+        state.buildings.copperMine = Math.max(1, state.buildings.copperMine);
         state.buildings.furnace = Math.max(1, state.buildings.furnace);
         state.buildings.factory = Math.max(1, state.buildings.factory);
+        state.buildings.assembler = Math.max(1, state.buildings.assembler);
+        break;
+      case "unlockChain":
+        // Grant the whole copper → circuit → alloy → blueprint chain.
+        state.buildings.copperMine = Math.max(1, state.buildings.copperMine);
+        state.buildings.furnace = Math.max(1, state.buildings.furnace);
+        state.buildings.factory = Math.max(1, state.buildings.factory);
+        state.buildings.assembler = Math.max(1, state.buildings.assembler);
+        state.techs.copperProcessing = Math.max(1, state.techs.copperProcessing);
+        state.techs.circuitFabrication = Math.max(1, state.techs.circuitFabrication);
+        state.techs.alloySynthesis = Math.max(1, state.techs.alloySynthesis);
+        state.resources.credits += 10_000;
+        applyTechUnlocks(state);
+        render.toast("DEBUG", "铜链配方已解锁", "warn");
         break;
       case "unlockPrestige":
-        state.stats.lifetimeCredits = Math.max(
-          state.stats.lifetimeCredits,
-          500_001,
+        state.runPeakCreditsPerSec = Math.max(
+          state.runPeakCreditsPerSec,
+          500,
         );
         render.toast("DEBUG", "Prestige 已解锁", "warn");
         break;
@@ -306,6 +397,32 @@ const handlers: render.Handlers = {
         state.stats.prestigeCount = Math.max(state.stats.prestigeCount, 3);
         state.lifetimeCoreData = Math.max(state.lifetimeCoreData, 80);
         render.toast("DEBUG", "所有星球已解锁", "warn");
+        break;
+      case "unlockAscend":
+        state.lifetimeCoreData = Math.max(state.lifetimeCoreData, 60);
+        render.toast("DEBUG", "升华已解锁", "warn");
+        break;
+      case "stargate":
+        state.stargateLevel += 1;
+        render.toast("DEBUG", `星门 → T${state.stargateLevel}`, "warn");
+        break;
+      case "event":
+        // Events are gated behind the first prestige; unlock and fire one.
+        state.stats.prestigeCount = Math.max(state.stats.prestigeCount, 1);
+        forceSpawnEvent(state);
+        render.toast("DEBUG", `触发事件（共 ${state.activeEvents.length} 个）`, "warn");
+        break;
+      case "contract":
+        state.stats.prestigeCount = Math.max(state.stats.prestigeCount, 1);
+        {
+          const offer = makeContractOffer(state);
+          if (offer) {
+            state.contractOffers.push(offer);
+            render.toast("DEBUG", `生成合同 #${offer.id}`, "warn");
+          } else {
+            render.toast("DEBUG", "没有可下单的资源（先建产线）", "warn");
+          }
+        }
         break;
       case "wipe":
         resetSave();
@@ -324,7 +441,7 @@ render.render(state);
 requestAnimationFrame(loop);
 
 // ---------- Keyboard shortcuts ----------
-// Q = mine, A/S/D/F = buy buildings, W/E/R = sell ore/steel/components.
+// Q = mine, A/S/D/F/G/H/J = buy buildings, W/E/R/T/Y/U = sell resources.
 // Ignored while typing in inputs (e.g. the import textarea) or with modifiers.
 window.addEventListener("keydown", (e) => {
   const tag = (e.target as HTMLElement | null)?.tagName;
@@ -337,6 +454,8 @@ window.addEventListener("keydown", (e) => {
     handlers.onMine();
   } else if (bind.type === "buy") {
     if (buildingUnlocked(state, bind.id)) handlers.onBuyBuilding(bind.id);
+  } else if (bind.type === "sellAll") {
+    handlers.onSellAll();
   } else {
     handlers.onSell(bind.res);
   }

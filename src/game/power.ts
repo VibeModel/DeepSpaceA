@@ -15,7 +15,14 @@ import type { BuildingId, GameState } from "./types";
 import type { TechModifiers } from "./research";
 
 // Buildings that consume power, in a stable order.
-const CONSUMERS: BuildingId[] = ["miningDrone", "furnace", "factory", "laboratory"];
+const CONSUMERS: BuildingId[] = [
+  "miningDrone",
+  "copperMine",
+  "furnace",
+  "factory",
+  "assembler",
+  "laboratory",
+];
 
 export interface PowerState {
   supply: number;

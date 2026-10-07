@@ -3,11 +3,18 @@ import {
   UPGRADES,
   INFINITE_TECH_COST_GROWTH,
   MAX_TECH_LEVEL,
+  RESOURCE_IDS,
 } from "./balance";
 import { capNumber, safePow } from "./num";
+import { RECIPE_LIST } from "./recipes";
 import { planetRegionModifiers } from "./planets";
+import { stargateModifiers } from "./stargate";
+import { stellarModifiers } from "./stellar";
+import { eventModifiers } from "./events";
 import type {
   GameState,
+  ResourceId,
+  RecipeId,
   TechId,
   TechDefinition,
   UpgradeId,
@@ -21,12 +28,11 @@ export function getTech(id: TechId): TechDefinition {
 }
 
 export interface TechModifiers {
-  miningMult: number;
-  smeltMult: number;
-  factoryMult: number;
-  researchMult: number;
-  steelYieldMult: number;
-  componentYieldMult: number;
+  // Producers (mining drone / copper mine / laboratory) indexed by resource.
+  producerMult: Record<ResourceId, number>;
+  // Processors indexed by recipe.
+  recipeSpeedMult: Record<RecipeId, number>;
+  recipeYieldMult: Record<RecipeId, number>;
   globalProdMult: number;
   costGrowthReduction: number;
   costMult: number;
@@ -37,7 +43,27 @@ export interface TechModifiers {
   unlockAnalytics: boolean;
   unlockAutoResearch: boolean;
   prestigeGainMult: number;
+  // Sell-price multiplier (random events can raise market prices).
+  sellMult: number;
+  // Stellar-chart gain multiplier (second-layer upgrades).
+  chartGainMult: number;
 }
+
+function onesMap<K extends string>(keys: readonly K[]): Record<K, number> {
+  const out = {} as Record<K, number>;
+  for (const k of keys) out[k] = 1;
+  return out;
+}
+
+const RECIPE_IDS: RecipeId[] = RECIPE_LIST.map((r) => r.id);
+// Recipes run by the furnace-like "smelting" stage vs the factory-like stages.
+const SMELT_RECIPES: RecipeId[] = ["smeltSteel", "smeltCopper"];
+const FABRICATION_RECIPES: RecipeId[] = [
+  "makeComponents",
+  "makeCircuit",
+  "makeAlloy",
+  "synthesizeBlueprint",
+];
 
 // Derive all numeric/mechanic modifiers from the set of purchased techs plus
 // permanent upgrades. Centralising this keeps simulation simple.
@@ -54,12 +80,9 @@ export function computeModifiers(state: GameState): TechModifiers {
   };
 
   const m: TechModifiers = {
-    miningMult: 1,
-    smeltMult: 1,
-    factoryMult: 1,
-    researchMult: 1,
-    steelYieldMult: 1,
-    componentYieldMult: 1,
+    producerMult: onesMap(RESOURCE_IDS),
+    recipeSpeedMult: onesMap(RECIPE_IDS),
+    recipeYieldMult: onesMap(RECIPE_IDS),
     globalProdMult: 1,
     costGrowthReduction: 0,
     costMult: 1,
@@ -70,28 +93,32 @@ export function computeModifiers(state: GameState): TechModifiers {
     unlockAnalytics: false,
     unlockAutoResearch: false,
     prestigeGainMult: 1,
+    sellMult: 1,
+    chartGainMult: 1,
   };
 
-  // Industrial Engineering (repeatable numeric techs use level-scaled `inf`).
-  m.miningMult *= inf("highPressureDrill");
-  m.steelYieldMult *= inf("advancedAlloys");
-  m.componentYieldMult *= inf("precisionMfg");
+  // Industrial Engineering.
+  m.producerMult.ore *= inf("highPressureDrill");
+  m.recipeYieldMult.smeltSteel *= inf("advancedAlloys");
+  m.recipeYieldMult.makeComponents *= inf("precisionMfg");
   m.globalProdMult *= inf("massProduction");
-  m.miningMult *= inf("overclockedDrills");
+  m.producerMult.ore *= inf("overclockedDrills");
 
-  // Automation
-  m.smeltMult *= inf("automatedSmelting");
-  m.factoryMult *= inf("automatedAssembly");
+  // Automation.
+  for (const rid of SMELT_RECIPES) m.recipeSpeedMult[rid] *= inf("automatedSmelting");
+  for (const rid of FABRICATION_RECIPES) {
+    m.recipeSpeedMult[rid] *= inf("automatedAssembly");
+  }
   m.powerSupplyMult *= inf("gridOptimization");
   if (t.automatedTrading) m.unlockAutoSell = true;
   if (t.autoBuyLogic) m.unlockAutoBuy = true;
   if (t.smartLogistics) m.costGrowthReduction += 0.05;
 
-  // Computing
-  m.researchMult *= inf("researchMethodology");
+  // Computing.
+  m.producerMult.research *= inf("researchMethodology");
   if (t.productionAnalytics) m.unlockAnalytics = true;
   if (t.efficientLabs) m.labUpkeepReduction += 0.3;
-  m.researchMult *= inf("quantumComputing");
+  m.producerMult.research *= inf("quantumComputing");
   if (t.coreSynthesis) m.prestigeGainMult *= 1.5;
   if (t.automatedResearch) m.unlockAutoResearch = true;
 
@@ -103,22 +130,51 @@ export function computeModifiers(state: GameState): TechModifiers {
     return 1 + (def.effectPerLevel ?? 0) * n;
   };
   m.globalProdMult *= pu("industrialMemory");
-  m.researchMult *= pu("researchArchive");
+  m.producerMult.research *= pu("researchArchive");
   if (p.automatedLogistics) m.unlockAutoSell = true;
+  // Blueprint (chain) upgrades.
+  m.producerMult.copperOre *= pu("copperExtractor");
+  for (const rid of ["makeCircuit", "makeAlloy"] as RecipeId[]) {
+    m.recipeSpeedMult[rid] *= pu("circuitOverclock");
+  }
+  for (const rid of ["makeAlloy", "synthesizeBlueprint"] as RecipeId[]) {
+    m.recipeYieldMult[rid] *= pu("alloyMastery");
+  }
 
-  // Planets + regions: the final multiplicative layer. Folding these in here
-  // means simulate / power / prestige all benefit with zero extra wiring.
+  // Planets + regions: translated from the legacy planet keys onto the
+  // recipe/producer maps so planets.ts stays untouched.
   const pr = planetRegionModifiers(state);
-  m.miningMult *= pr.miningMult;
-  m.smeltMult *= pr.smeltMult;
-  m.factoryMult *= pr.factoryMult;
-  m.researchMult *= pr.researchMult;
-  m.steelYieldMult *= pr.steelYieldMult;
-  m.componentYieldMult *= pr.componentYieldMult;
+  m.producerMult.ore *= pr.miningMult;
+  m.producerMult.research *= pr.researchMult;
+  for (const rid of SMELT_RECIPES) m.recipeSpeedMult[rid] *= pr.smeltMult;
+  for (const rid of FABRICATION_RECIPES) m.recipeSpeedMult[rid] *= pr.factoryMult;
+  m.recipeYieldMult.smeltSteel *= pr.steelYieldMult;
+  m.recipeYieldMult.makeComponents *= pr.componentYieldMult;
   m.globalProdMult *= pr.globalProdMult;
   m.powerSupplyMult *= pr.powerSupplyMult;
   m.costMult *= pr.costMult;
   m.prestigeGainMult *= pr.prestigeGainMult;
+
+  // Megastructure (stargate) + second-layer (stellar chart) meta. Both are
+  // pure functions of persistent state, so folding them here makes every
+  // consumer (simulation, power, prestige, contracts) benefit automatically.
+  const sg = stargateModifiers(state);
+  m.globalProdMult *= sg.globalProdMult;
+  m.powerSupplyMult *= sg.powerSupplyMult;
+  m.costMult *= sg.costMult;
+  const st = stellarModifiers(state);
+  m.globalProdMult *= st.globalProdMult;
+  m.costMult *= st.costMult;
+  m.prestigeGainMult *= st.prestigeGainMult;
+  m.chartGainMult *= st.chartGainMult;
+
+  // Live random events — temporary, run-scoped modifiers folded last so they
+  // apply on top of everything else (and vanish when the event expires).
+  const ev = eventModifiers(state);
+  m.globalProdMult *= ev.prodMult;
+  m.producerMult.research *= ev.researchMult;
+  m.powerSupplyMult *= ev.powerMult;
+  m.sellMult *= ev.sellMult;
 
   return m;
 }

@@ -70,6 +70,20 @@ function ok(cond: boolean, msg: string): void {
   ok(!got.includes("firstOre"), "threshold: firstOre stays locked without ore");
 }
 
+// --- copper / recipe chain achievements ---
+{
+  const s = createNewGame();
+  ok(!s.achievements.firstCopper, "chain: firstCopper starts locked");
+  s.stats.totalCopperOre = 1;
+  s.stats.totalCircuit = 1;
+  s.stats.totalAlloy = 1;
+  s.stats.totalBlueprints = 1;
+  const got = evaluateAchievements(s);
+  for (const id of ["firstCopper", "circuitMaker", "alloySmith", "blueprintArchitect"] as const) {
+    ok(got.includes(id), `chain: ${id} unlocks`);
+  }
+}
+
 // --- progress helper ---
 {
   const s = createNewGame();
@@ -84,7 +98,7 @@ function ok(cond: boolean, msg: string): void {
 // --- achievements survive prestige ---
 {
   const s = createNewGame();
-  s.stats.lifetimeCredits = 600_000; // above the prestige threshold
+  s.runPeakCreditsPerSec = 500; // above the prestige cps threshold
   s.achievements.firstOre = true;
   const gained = doPrestige(s);
   ok(gained > 0, "prestige: grants core data");

@@ -32,14 +32,28 @@ export function upgradeMaxed(state: GameState, id: UpgradeId): boolean {
   return upgradeLevel(state, id) >= 1;
 }
 
+// Wallet an upgrade is bought from: core data (legacy default) or blueprints.
+export function upgradeCurrency(id: UpgradeId): "coreData" | "blueprints" {
+  return getUpgrade(id).currency ?? "coreData";
+}
+
+function wallet(state: GameState, id: UpgradeId): number {
+  return upgradeCurrency(id) === "blueprints" ? state.blueprints : state.coreData;
+}
+
 export function canBuyUpgrade(state: GameState, id: UpgradeId): boolean {
   if (upgradeMaxed(state, id)) return false;
-  return state.coreData >= upgradeCost(state, id);
+  return wallet(state, id) >= upgradeCost(state, id);
 }
 
 export function buyUpgrade(state: GameState, id: UpgradeId): boolean {
   if (!canBuyUpgrade(state, id)) return false;
-  state.coreData -= upgradeCost(state, id);
+  const cost = upgradeCost(state, id);
+  if (upgradeCurrency(id) === "blueprints") {
+    state.blueprints = capNumber(state.blueprints - cost);
+  } else {
+    state.coreData -= cost;
+  }
   state.permanentUpgrades[id] = upgradeLevel(state, id) + 1;
   applyTechUnlocks(state);
   return true;

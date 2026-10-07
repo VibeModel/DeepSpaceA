@@ -1,17 +1,35 @@
-import { SAVE_VERSION } from "./balance";
-import type { GameState } from "./types";
-import { applyTechUnlocks } from "./research";
+import {
+  BUILDING_ORDER,
+  RESOURCE_IDS,
+  SAVE_VERSION,
+  SELLABLE_RESOURCES,
+  EVENT_SPAWN_SEC,
+  CONTRACT_SPAWN_SEC,
+} from "./balance";
+import type {
+  BuildingId,
+  GameState,
+  ResourceId,
+  SellableResource,
+  TechId,
+} from "./types";
+import { applyTechUnlocks, TECH_LIST } from "./research";
 import { emptyAchievementMap } from "./achievements";
 import { emptyRegionMap } from "./planets";
+import { emptyStellarUpgradeMap } from "./stellar";
+import { defaultRecipeMix } from "./recipes";
+import { emptyRates } from "./simulation";
 
 // A fresh, empty run (used at new game and after each prestige). Keeps only
-// the fields that should NOT be wiped by a prestige.
+// the fields that should NOT be wiped by a prestige. Everything is generated
+// from the canonical `*_IDS` / `*_LIST` sources so adding a resource, building
+// or tech never leaves a hole in the defaults.
 export function freshRunState(): Omit<
   GameState,
   | "version"
   | "coreData"
   | "lifetimeCoreData"
-  | "prestigeGranted"
+  | "blueprints"
   | "permanentUpgrades"
   | "achievements"
   | "stats"
@@ -19,55 +37,48 @@ export function freshRunState(): Omit<
   | "lastTick"
   // nextPlanet persists across prestiges, so it must NOT be reset here.
   | "nextPlanet"
+  // Megastructure + second-layer meta (survive both resets).
+  | "stargateLevel"
+  | "stellarCharts"
+  | "lifetimeStellarCharts"
+  | "chartsGranted"
+  | "stellarUpgrades"
+  | "ascensionCount"
+  | "rngSeed"
 > {
+  const resources = {} as Record<ResourceId, number>;
+  for (const id of RESOURCE_IDS) resources[id] = 0;
+
+  const buildings = {} as Record<BuildingId, number>;
+  for (const id of BUILDING_ORDER) buildings[id] = 0;
+
+  const techs = {} as Record<TechId, number>;
+  for (const t of TECH_LIST) techs[t.id] = 0;
+
+  const autoBuy = {} as Record<BuildingId, boolean>;
+  for (const id of BUILDING_ORDER) autoBuy[id] = false;
+
+  const autoSell = {} as Record<SellableResource, boolean>;
+  for (const id of SELLABLE_RESOURCES) autoSell[id] = false;
+
   return {
     planet: "homeworld",
     regions: emptyRegionMap(),
-    resources: {
-      ore: 0,
-      steel: 0,
-      components: 0,
-      credits: 0,
-      research: 0,
-    },
-    buildings: {
-      miningDrone: 0,
-      solarArray: 0,
-      furnace: 0,
-      factory: 0,
-      laboratory: 0,
-    },
-    techs: {
-      highPressureDrill: 0,
-      advancedAlloys: 0,
-      precisionMfg: 0,
-      massProduction: 0,
-      overclockedDrills: 0,
-      automatedSmelting: 0,
-      automatedAssembly: 0,
-      gridOptimization: 0,
-      automatedTrading: 0,
-      autoBuyLogic: 0,
-      smartLogistics: 0,
-      researchMethodology: 0,
-      productionAnalytics: 0,
-      efficientLabs: 0,
-      quantumComputing: 0,
-      coreSynthesis: 0,
-      automatedResearch: 0,
-    },
-    autoSell: {
-      ore: false,
-      steel: false,
-      components: false,
-    },
-    autoBuy: {
-      miningDrone: false,
-      solarArray: false,
-      furnace: false,
-      factory: false,
-      laboratory: false,
-    },
+    resources,
+    buildings,
+    techs,
+    recipeMix: defaultRecipeMix(),
+    runPeakCreditsPerSec: 0,
+    // Run-scoped random events + contracts. Both are wiped by a prestige (and
+    // an ascension), because they are tied to the current run's production.
+    activeEvents: [],
+    eventSpawnIn: EVENT_SPAWN_SEC,
+    contractOffers: [],
+    activeContracts: [],
+    contractSpawnIn: CONTRACT_SPAWN_SEC,
+    nextContractId: 1,
+    autoSell,
+    autoBuy,
     autoResearch: false,
     flags: {
       autoSellUnlocked: false,
@@ -75,34 +86,21 @@ export function freshRunState(): Omit<
       analyticsUnlocked: false,
       autoResearchUnlocked: false,
     },
-    rates: {
-      ore: 0,
-      steel: 0,
-      components: 0,
-      research: 0,
-      credits: 0,
-      oreProd: 0,
-      steelProd: 0,
-      compProd: 0,
-      researchProd: 0,
-      furnaceCap: 0,
-      factoryCap: 0,
-      furnaceInput: 0,
-      factoryInput: 0,
-      furnaceYield: 1,
-      factoryYield: 1,
-      powerSupply: 0,
-      powerDemand: 0,
-      powerFactor: 1,
-      furnaceUtil: 0,
-      factoryUtil: 0,
-      labActive: false,
-      oreShortage: false,
-      oreAccumulating: false,
-      steelShortage: false,
-      steelAccumulating: false,
-    },
+    rates: emptyRates(),
   };
+}
+
+// Run-start bonuses granted by permanent upgrades. Shared by createNewGame and
+// doPrestige so the two never drift apart.
+export function applyRunStartBonuses(state: GameState): void {
+  const fb = state.permanentUpgrades.fasterBoot || 0;
+  if (fb > 0) {
+    state.buildings.miningDrone = Math.max(state.buildings.miningDrone, 2 * fb);
+  }
+  const ab = state.permanentUpgrades.assemblerBoot || 0;
+  if (ab > 0) {
+    state.buildings.assembler = Math.max(state.buildings.assembler, ab);
+  }
 }
 
 // Build a brand new game state (first ever play). Applies starting permanent
@@ -115,7 +113,15 @@ export function createNewGame(): GameState {
     lastTick: now,
     coreData: 0,
     lifetimeCoreData: 0,
-    prestigeGranted: 0,
+    blueprints: 0,
+    // Deterministic PRNG seed so a fresh game is reproducible in tests.
+    rngSeed: 0x9e3779b9,
+    stargateLevel: 0,
+    stellarCharts: 0,
+    lifetimeStellarCharts: 0,
+    chartsGranted: 0,
+    stellarUpgrades: emptyStellarUpgradeMap(),
+    ascensionCount: 0,
     nextPlanet: "homeworld",
     achievements: emptyAchievementMap(),
     permanentUpgrades: {
@@ -123,6 +129,10 @@ export function createNewGame(): GameState {
       industrialMemory: 0,
       automatedLogistics: 0,
       researchArchive: 0,
+      copperExtractor: 0,
+      circuitOverclock: 0,
+      alloyMastery: 0,
+      assemblerBoot: 0,
     },
     stats: {
       currentRunStart: now,
@@ -130,6 +140,11 @@ export function createNewGame(): GameState {
       totalOre: 0,
       totalSteel: 0,
       totalComponents: 0,
+      totalCopperOre: 0,
+      totalCopper: 0,
+      totalCircuit: 0,
+      totalAlloy: 0,
+      totalBlueprints: 0,
       lifetimeCredits: 0,
       buildingsPurchased: 0,
       prestigeCount: 0,
@@ -138,12 +153,7 @@ export function createNewGame(): GameState {
     ...freshRunState(),
   };
 
-  // Faster Boot: start each run with 2 mining drones per level.
-  const fb = state.permanentUpgrades.fasterBoot || 0;
-  if (fb > 0) {
-    state.buildings.miningDrone = 2 * fb;
-  }
-
+  applyRunStartBonuses(state);
   applyTechUnlocks(state);
   return state;
 }

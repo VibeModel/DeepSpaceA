@@ -44,7 +44,7 @@ function near(a: number, b: number, eps = 1e-6): boolean {
 // Make a state that can prestige right now (has unclaimed core data).
 function prestigable(): GameState {
   const s = createNewGame();
-  s.stats.lifetimeCredits = 500_000; // raw entitlement = floor(sqrt(100)) = 10
+  s.runPeakCreditsPerSec = 500; // raw entitlement = floor(sqrt(500/5)) = 10
   return s;
 }
 
@@ -101,10 +101,10 @@ function prestigable(): GameState {
   const s2 = createNewGame();
   s2.buildings.miningDrone = 1;
   simulate(s2, 1000);
-  ok(near(s2.rates.oreProd, 1), "mods: homeworld mining rate = 1");
+  ok(near(s2.rates.production.ore, 1), "mods: homeworld mining rate = 1");
   s2.planet = "ferrum";
   simulate(s2, 1000);
-  ok(near(s2.rates.oreProd, 1.6), "mods: ferrum mining rate = 1.6");
+  ok(near(s2.rates.production.ore, 1.6), "mods: ferrum mining rate = 1.6");
 }
 
 // --- 3. Building cost multiplier ---
